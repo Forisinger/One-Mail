@@ -21,6 +21,7 @@ import tkinter as tk
 from core.account import AccountManager
 from core.scheduler import Scheduler, EV_NEW_MAIL, EV_STATUS
 from notify import send as notify_send
+from single_instance import acquire, notify_running_instance, start_watcher
 from storage import config as config_store, database
 from storage.config import data_dir
 from ui.main_window import MainWindow
@@ -50,6 +51,12 @@ class App:
         self.root.after(400, self.window.prompt_missing_password)
         self._poll_events()
 
+        # 其他实例二次启动 exe 时，唤醒主窗口置前
+        start_watcher(
+            lambda: self.tray_commands.put({"cmd": CMD_SHOW}),
+            error_log=self._log,
+        )
+
         if not start_minimized:
             self.root.deiconify()
         else:
@@ -63,6 +70,9 @@ class App:
     def show_window(self):
         self.root.deiconify()
         self.root.lift()
+        # Windows 下跨应用抢焦点受限：临时置顶再取消，确保真正弹到最上层
+        self.root.attributes("-topmost", True)
+        self.root.after(200, lambda: self.root.attributes("-topmost", False))
         self.root.focus_force()
 
     def update_badge(self):
@@ -147,6 +157,10 @@ class App:
 
 
 def main():
+    # 单实例：已有 OneMail 在运行时，唤醒其主窗口并退出本进程
+    if not acquire():
+        notify_running_instance()
+        return
     start_minimized = "--minimized" in sys.argv or bool(
         config_store.load().get("settings", {}).get("start_minimized", True)
     )
