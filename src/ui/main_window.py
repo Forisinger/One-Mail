@@ -15,6 +15,7 @@ from PIL import ImageTk
 
 from core.account import Account, AccountManager
 from storage import database as db
+from storage import config as config_store
 from core.scheduler import Scheduler
 from . import icon as icon_mod
 from .account_dialog import AccountDialog
@@ -72,6 +73,9 @@ class MainWindow:
         self._filter_account: str | None = None   # None = 全部账户
         self._search_var = tk.StringVar()
         self._account_rows: list[tuple[tk.Frame, str | None]] = []
+        self._collapsed = bool(
+            config_store.load().get("settings", {}).get("accounts_collapsed", False)
+        )
 
         root.title("一邮通 OneMail")
         root.geometry("1060x660")
@@ -118,22 +122,37 @@ class MainWindow:
 
     # ---------- 主体三栏 ----------
     def _build_panes(self):
-        pane = ttk.Panedwindow(self.root, orient="horizontal")
-        pane.pack(fill="both", expand=True, padx=10, pady=6)
+        # 最左：收起/展开账户面板的细条（面板收起后仍可由此展开）
+        strip = tk.Frame(self.root, bg=BG)
+        strip.pack(side="left", fill="y", padx=(10, 0), pady=6)
+        self._strip_btn = tk.Label(
+            strip, text="«", bg=CARD, fg=GRAY, font=FONT_UI_B, width=2,
+            cursor="hand2", highlightbackground="#d4dcea", highlightthickness=1,
+        )
+        self._strip_btn.pack(expand=True, fill="y")
+        self._strip_btn.bind("<Button-1>", lambda e: self.toggle_accounts())
+
+        self._pane = ttk.Panedwindow(self.root, orient="horizontal")
+        self._pane.pack(fill="both", expand=True, padx=(6, 10), pady=6)
 
         # 左：账户面板（卡片）
-        left_card = ttk.Frame(pane, style="Card.TFrame")
-        pane.add(left_card, weight=1)
-        ttk.Label(left_card, text="邮箱账户", style="Card.TLabel",
-                  font=FONT_UI_B, background=CARD,
-                  foreground=TEXT).pack(anchor="w", padx=14, pady=(12, 4))
-        self.account_list_frame = tk.Frame(left_card, bg=CARD)
+        self._left_card = ttk.Frame(self._pane, style="Card.TFrame")
+        self._pane.insert("end", self._left_card, weight=1)
+        header = tk.Frame(self._left_card, bg=CARD)
+        header.pack(fill="x", padx=14, pady=(12, 4))
+        tk.Label(header, text="邮箱账户", bg=CARD, fg=TEXT,
+                 font=FONT_UI_B).pack(side="left")
+        self._header_btn = tk.Label(header, text="«", bg=CARD, fg=GRAY,
+                                    font=FONT_UI_B, cursor="hand2")
+        self._header_btn.pack(side="right")
+        self._header_btn.bind("<Button-1>", lambda e: self.toggle_accounts())
+        self.account_list_frame = tk.Frame(self._left_card, bg=CARD)
         self.account_list_frame.pack(fill="both", expand=True,
                                      padx=8, pady=(4, 8))
 
         # 右：邮件列表 + 阅读区
-        right = ttk.Panedwindow(pane, orient="vertical")
-        pane.add(right, weight=3)
+        right = ttk.Panedwindow(self._pane, orient="vertical")
+        self._pane.add(right, weight=3)
 
         cols = ("account", "from", "subject", "date")
         frame_top = ttk.Frame(right, style="Card.TFrame")
@@ -178,6 +197,28 @@ class MainWindow:
         self.txt_body.pack(side="left", fill="both", expand=True)
         bsb.pack(side="right", fill="y")
         right.add(body_card, weight=2)
+
+        # 应用上次记忆的收起状态
+        if self._collapsed:
+            self.toggle_accounts()
+
+    # ---------- 账户面板收起/展开 ----------
+    def toggle_accounts(self):
+        """收起或展开左侧账户面板（含"全部邮件"），状态写入配置记忆。"""
+        self._collapsed = not self._collapsed
+        if self._collapsed:
+            self._pane.remove(self._left_card)
+        else:
+            self._pane.insert(0, self._left_card, weight=1)
+        chevron = "»" if self._collapsed else "«"
+        self._strip_btn.configure(text=chevron)
+        self._header_btn.configure(text=chevron)
+        try:
+            cfg = config_store.load()
+            cfg.setdefault("settings", {})["accounts_collapsed"] = self._collapsed
+            config_store.save(cfg)
+        except Exception:
+            pass  # 状态记忆失败不影响功能
 
     # ---------- 状态栏 ----------
     def _build_statusbar(self):
