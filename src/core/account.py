@@ -1,0 +1,111 @@
+# -*- coding: utf-8 -*-
+"""账户模型与账户管理器。
+
+账户元数据存 config.json；密码经 DPAPI 加密后存 secrets.bin，两者分离。
+"""
+from __future__ import annotations
+
+import uuid
+from dataclasses import dataclass, field, asdict
+
+from . import security
+from storage import config
+
+# 国内常见邮箱 -> IMAP 服务器预置（一期范围：国内邮箱 + 任意 IMAP）
+KNOWN_HOSTS = {
+    "qq.com": ("imap.qq.com", 993),
+    "foxmail.com": ("imap.qq.com", 993),
+    "163.com": ("imap.163.com", 993),
+    "126.com": ("imap.126.com", 993),
+    "sina.com": ("imap.sina.com", 993),
+    "sohu.com": ("imap.sohu.com", 993),
+    "aliyun.com": ("imap.aliyun.com", 993),
+    "139.com": ("imap.139.com", 993),
+}
+
+
+@dataclass
+class Account:
+    id: str
+    name: str                 # 用户起的显示名（来源标注用）
+    email: str
+    imap_host: str
+    imap_port: int = 993
+    ssl: bool = True
+    enabled: bool = True
+    idle_supported: bool | None = None   # None=未知，连接后探测
+    poll_interval: int = 300             # IDLE 不可用时的轮询间隔
+    extra: dict = field(default_factory=dict)
+
+    @staticmethod
+    def guess_host(email_addr: str) -> tuple[str, int]:
+        domain = email_addr.rsplit("@", 1)[-1].lower()
+        for d, (host, port) in KNOWN_HOSTS.items():
+            if domain.endswith(d):
+                return host, port
+        return ("imap." + domain if domain else "", 993)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @staticmethod
+    def from_dict(d: dict) -> "Account":
+        fields = {f for f in Account.__dataclass_fields__}
+        return Account(**{k: v for k, v in d.items() if k in fields})
+
+
+class AccountManager:
+    """负责账户的增删改查与持久化。"""
+
+    def __init__(self):
+        self._accounts: dict[str, Account] = {}
+        for d in config.load().get("accounts", []):
+            try:
+                acc = Account.from_dict(d)
+                self._accounts[acc.id] = acc
+            except TypeError:
+                pass  # 字段不兼容的旧配置直接跳过，不崩溃
+
+    # ---- 查询 ----
+    def all(self) -> list[Account]:
+        return list(self._accounts.values())
+
+    def enabled(self) -> list[Account]:
+        return [a for a in self._accounts.values() if a.enabled]
+
+    def get(self, account_id: str) -> Account | None:
+        return self._accounts.get(account_id)
+
+    def password(self, account_id: str) -> str:
+        return security.load_password(account_id)
+
+    # ---- 增删改 ----
+    def add(self, name: str, email_addr: str, password: str,
+            imap_host: str = "", imap_port: int = 0, ssl: bool = True) -> Account:
+        if not imap_host:
+            imap_host, default_port = Account.guess_host(email_addr)
+            imap_port = imap_port or default_port
+        acc = Account(
+            id=uuid.uuid4().hex[:8], name=name or email_addr, email=email_addr,
+            imap_host=imap_host, imap_port=imap_port or 993, ssl=ssl,
+        )
+        self._accounts[acc.id] = acc
+        security.save_password(acc.id, password)
+        self._persist()
+        return acc
+
+    def update(self, acc: Account, password: str | None = None) -> None:
+        self._accounts[acc.id] = acc
+        if password:
+            security.save_password(acc.id, password)
+        self._persist()
+
+    def remove(self, account_id: str) -> None:
+        self._accounts.pop(account_id, None)
+        security.delete_password(account_id)
+        self._persist()
+
+    def _persist(self) -> None:
+        data = config.load()
+        data["accounts"] = [a.to_dict() for a in self._accounts.values()]
+        config.save(data)
