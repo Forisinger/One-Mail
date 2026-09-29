@@ -8,6 +8,42 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versio
 
 ---
 
+## [1.6.0] — 2026-09-29
+
+Attachment saving from the reading pane (on-demand server re-fetch). · 阅读区保存附件（按需从服务器重新取原文）。
+
+### Added · 新增
+
+**English**
+
+- **Save attachments**: reading-pane right-click → 保存附件… — pick a folder and OneMail fetches the raw message from the server by UID (BODY.PEEK[], read-only), extracts every attachment with proper RFC 2047 name decoding (Chinese names intact) and writes them out, deduplicating name collisions as `name(1).ext`. Runs on a worker thread with status-bar progress/errors
+- `MailClient.fetch_raw()` + `parser.extract_attachments()`: reusable, offline-testable building blocks; name-collision and unnamed-attachment edge cases handled
+- Verified end-to-end against a live NetEase 163 mailbox (fetch_raw returns the original bytes)
+
+**中文**
+
+- **保存附件**：阅读区右键 →「保存附件…」——选择目录后按 UID 从服务器重新取回邮件原文（BODY.PEEK[]，不打已读标记），解析出全部附件（RFC 2047 文件名解码、中文名完好）后写出，重名自动加 `(1)` 后缀。后台线程执行，状态栏显示进度与错误
+- `MailClient.fetch_raw()` + `parser.extract_attachments()`：可复用、可离线单测的构件；处理重名与未命名附件边界
+- 已对网易 163 真实邮箱端到端验证（fetch_raw 返回原始字节）
+
+---
+
+Sortable columns and a real-mailbox end-to-end verification tool. · 列头排序与真实邮箱端到端验证工具。
+
+### Added · 新增
+
+**English**
+
+- **Sortable columns**: click 来源 / 发件人 / 主题 / 时间 headers to sort (click again to reverse, ▲/▼ indicator); sorting is UI-side so it composes with search and filters
+- `tools/verify_163.py`: end-to-end verification against a real mailbox (temp DB, read-only effects) — connect, UIDVALIDITY read, folder listing with mUTF-7 decoding, incremental fetch watermark behavior. Verified live against NetEase 163: 6 folders decoded correctly (草稿箱/已发送/垃圾邮件…), first pass fetched 4 unseen mails, second pass downloaded 0 with unchanged watermark
+
+**中文**
+
+- **列头排序**：点击 来源 / 发件人 / 主题 / 时间 列头排序（再点反转，列头显示 ▲/▼）；UI 侧排序，与搜索、过滤器自由叠加
+- `tools/verify_163.py`：真实邮箱端到端验证工具（临时数据库，只读效果）——连接、UIDVALIDITY 读取、文件夹列表 mUTF-7 解码、增量抓取水位行为。已对网易 163 实测：6 个文件夹中文名解码正确（草稿箱/已发送/垃圾邮件…），第一轮抓取 4 封未读，第二轮 0 下载且水位不变
+
+---
+
 ## [1.5.2] — 2026-09-29
 
 Sortable columns and a real-mailbox end-to-end verification tool. · 列头排序与真实邮箱端到端验证工具。

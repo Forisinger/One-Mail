@@ -100,6 +100,37 @@ class SmtpHeaderTests(unittest.TestCase):
         self.assertTrue(msg["Message-ID"])
         self.assertIn("163.com", msg["Message-ID"])
 
+    def test_extract_attachments_roundtrip(self):
+        """build_mime 组装的带附件邮件 -> extract_attachments 还原。"""
+        import tempfile
+        from core.parser import extract_attachments
+        acc = Account(id="x", name="n", email="u@163.com",
+                      imap_host="imap.163.com")
+        with tempfile.TemporaryDirectory() as td:
+            p1 = os.path.join(td, "报告.pdf")
+            p2 = os.path.join(td, "数据.zip")
+            with open(p1, "wb") as f:
+                f.write(b"%PDF-1.4 test")
+            with open(p2, "wb") as f:
+                f.write(b"PK\x03\x04 zipdata")
+            msg = smtp_client.build_mime(acc, ["t@x.com"], "附件邮件", "正文",
+                                         [p1, p2])
+            raw = msg.as_bytes()
+        atts = extract_attachments(raw)
+        names = {n for n, _ in atts}
+        self.assertEqual(names, {"报告.pdf", "数据.zip"})
+        data = {n: d for n, d in atts}
+        self.assertEqual(data["报告.pdf"], b"%PDF-1.4 test")
+        self.assertEqual(data["数据.zip"], b"PK\x03\x04 zipdata")
+
+    def test_extract_attachments_plain_mail(self):
+        from core.parser import extract_attachments
+        msg = smtp_client.build_mime(
+            Account(id="x", name="n", email="u@163.com",
+                    imap_host="imap.163.com"),
+            ["t@x.com"], "无附件", "正文")
+        self.assertEqual(extract_attachments(msg.as_bytes()), [])
+
 
 class ConfigAtomicTests(unittest.TestCase):
     def setUp(self):

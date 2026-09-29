@@ -9,9 +9,11 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
+import threading
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, filedialog, messagebox
 
 from PIL import ImageTk
 
@@ -78,6 +80,7 @@ class MainWindow:
         self._sort_key = "date"      # 列头排序（v1.5.2）
         self._sort_desc = True
         self._col_titles = {}
+        self._current_mail = None    # 阅读区当前邮件（保存附件用）
         self._account_rows: list[tuple[tk.Frame, str | None]] = []
         self._collapsed = bool(
             config_store.load().get("settings", {}).get("accounts_collapsed", False)
@@ -387,6 +390,7 @@ class MainWindow:
             self.root.event_generate("<<UnreadChanged>>", when="tail")
         acc = self.manager.get(mail["account_id"])
         acc_name = acc.name if acc else mail["account_id"]
+        self._current_mail = mail
         body = mail["body_text"] or "（无正文/解析失败）"
         self.txt_body.configure(state="normal")
         self.txt_body.delete("1.0", "end")
@@ -469,13 +473,61 @@ class MainWindow:
         menu.destroy()
 
     def _body_menu(self, event):
-        """阅读区右键：复制选中 / 全选。"""
+        """阅读区右键：复制选中 / 全选 / 保存附件。"""
         menu = tk.Menu(self.root, tearoff=0)
         menu.add_command(label="复制", command=self._copy_body_selection)
         menu.add_command(label="全选", command=lambda: self.txt_body.tag_add("sel", "1.0", "end"))
+        has_att = bool(self._current_mail and self._current_mail["has_attachment"])
+        menu.add_separator()
+        menu.add_command(label="保存附件…", state="normal" if has_att else "disabled",
+                         command=self.save_attachments)
         menu.tk_popup(event.x_root, event.y_root)
         menu.grab_release()
         menu.destroy()
+
+    def save_attachments(self):
+        """把当前邮件的附件保存到所选目录（按 UID 从服务器重新取原文）。"""
+        from core.mail_client import MailClient
+        from core.parser import extract_attachments
+        mail = self._current_mail
+        if not mail or not mail["has_attachment"]:
+            return
+        acc = self.manager.get(mail["account_id"])
+        if acc is None:
+            self.var_status.set("该邮件的来源账户已被删除，无法取回附件")
+            return
+        dest = filedialog.askdirectory(parent=self.root, title="选择附件保存位置")
+        if not dest:
+            return
+        pwd = self.manager.password(acc.id)
+        uid, folder = mail["uid"], getattr(acc, "folder", "INBOX")
+        self.var_status.set("正在从服务器取回邮件原文…")
+
+        def work():
+            try:
+                raw = MailClient.fetch_raw(acc, pwd, folder, uid)
+                atts = extract_attachments(raw)
+                if not atts:
+                    msg = "未在服务器原文中解析出附件"
+                else:
+                    saved = 0
+                    for name, data in atts:
+                        safe = os.path.basename(name.replace("\\", "_")) or "附件"
+                        path = os.path.join(dest, safe)
+                        stem, ext = os.path.splitext(path)
+                        n = 1
+                        while os.path.exists(path):
+                            path = f"{stem}({n}){ext}"
+                            n += 1
+                        with open(path, "wb") as f:
+                            f.write(data)
+                        saved += 1
+                    msg = f"已保存 {saved} 个附件到 {dest}"
+            except Exception as e:
+                msg = f"附件保存失败：{type(e).__name__}: {e}"
+            self.root.after(0, lambda: self.var_status.set(msg))
+
+        threading.Thread(target=work, name="onemail-attach", daemon=True).start()
 
     def _copy_body_selection(self):
         try:

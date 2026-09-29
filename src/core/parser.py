@@ -225,3 +225,28 @@ def parse_raw(raw: bytes) -> ParsedMail:
     except Exception:
         pass
     return out
+
+
+def extract_attachments(raw: bytes) -> list[tuple[str, bytes]]:
+    """从原始邮件字节提取全部附件，返回 (已解码文件名, 内容字节) 列表。
+
+    供「保存附件」功能按需调用（邮件原文不落盘，需要时按 UID 重新取）。
+    解析失败返回空列表，绝不抛异常。
+    """
+    try:
+        msg = email.message_from_bytes(raw)
+        out: list[tuple[str, bytes]] = []
+        for part in msg.walk():
+            filename = part.get_filename()
+            if not filename:
+                disp = str(part.get("Content-Disposition", "") or "")
+                if not (disp and "attachment" in disp.lower()):
+                    continue
+                filename = "(未命名附件)"
+            payload = part.get_payload(decode=True)
+            if payload is None:
+                continue
+            out.append((_decode_header_value(filename), payload))
+        return out
+    except Exception:
+        return []

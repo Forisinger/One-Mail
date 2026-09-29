@@ -202,7 +202,12 @@ CREATE INDEX idx_mails_account ON mails(account_id, received_at DESC);
 - **Misc**: tray degrades gracefully without a shell; badge digits use a TrueType font with fallback; all accounts missing auth codes are prompted chain-wise at startup
 - **v1.5.1 corrections**: watermark advances only after confirmed synchronous insert (worker-thread insert, new-only notifications, event-queue drained on quit) — closing the loss window where a fetched mail could be permanently skipped; a failed FETCH ends the batch (resume next cycle); folder names go through `_folder_wire()` (mUTF-7 + quoting) since imaplib sends ascii-encoded unquoted commands; `list_folders` NameError fixed; IDLE continuation wait bounded with untagged-line tolerance; save_to_sent APPENDs the raw mUTF-7 name
 
-### 14. Footprint guarantees
+### 14. Attachment saving & sorting (v1.6.0)
+- **Save attachments**: reading-pane right-click → worker thread calls `MailClient.fetch_raw()` (BODY.PEEK[] by UID, read-only), `parser.extract_attachments()` decodes RFC 2047 names and writes files with `(n)` collision suffixes; raw messages are never stored locally, fetched on demand
+- **Sortable columns**: click-to-sort (toggle direction), UI-side so it composes with search/filters
+- `tools/verify_163.py`: live-mailbox end-to-end verification harness (temp DB): connect / UIDVALIDITY / folder list / incremental watermark / raw fetch
+
+### 15. Footprint guarantees
 - No Electron/Qt/browser engine — tkinter is the whole UI
 - IDLE blocks on the socket = 0% idle CPU; polling accounts wake briefly per interval
 - Body text truncated to 64 KB on ingest to bound DB growth

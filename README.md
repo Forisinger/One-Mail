@@ -19,6 +19,7 @@
 | 📋 CC & BCC support | 支持抄送与密送 |
 | 🔍 Full-text search (incl. body) + Unread / Has-attachment filters | 全文搜索（含正文）+ 未读/有附件快捷筛选 |
 | ↕️ Click-to-sort columns | 列头点击排序 |
+| 📎 Save attachments from the reading pane (on-demand server fetch) | 阅读区保存附件（按需从服务器取原文） |
 | 📁 Per-account receive-folder selection (default INBOX) | 账户级收信文件夹选择（默认 INBOX） |
 | 📤 Sent-mail sync to the server's Sent folder (best-effort) | 发送后尽力同步到服务器"已发送"文件夹 |
 | 🖥️ Single instance: re-launching the exe brings the window to front | 单实例：再次启动自动唤醒主窗口置前 |

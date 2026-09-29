@@ -135,19 +135,8 @@ class MailClient:
         return (getattr(self.account, "folder", "") or "INBOX").strip() or "INBOX"
 
     def _folder_wire(self) -> str:
-        """IMAP 协议层的文件夹名：带引号 + 非 ASCII 名转回修改版 UTF-7。
-
-        imaplib 以 ascii 编码命令且不加引号：中文名会 UnicodeEncodeError，
-        含空格的名字会被拆成多个 atom 被服务器拒绝——都必须在此转换。
-        """
-        name = self._folder()
-        if re.search(r"&[0-9A-Za-z,+\-]+-", name):
-            return f'"{name}"'   # 用户直接填了服务器原始 mUTF-7 名：原样使用
-        try:
-            name.encode("ascii")
-            return f'"{name}"'
-        except UnicodeEncodeError:
-            return f'"{_encode_mutf7(name)}"'
+        """IMAP 协议层的文件夹名（见模块级 folder_to_wire）。"""
+        return folder_to_wire(self._folder())
 
     @staticmethod
     def _send_client_id(conn) -> None:
@@ -414,6 +403,51 @@ class MailClient:
                 conn.logout()
             except Exception:
                 pass
+
+
+    # ---------- 按需取原文（供「保存附件」等离线功能调用） ----------
+    @staticmethod
+    def fetch_raw(account, password: str, folder: str, uid: str,
+                  timeout: float = _CONNECT_TIMEOUT) -> bytes:
+        """临时连接服务器，按 UID 取回邮件原文（BODY.PEEK[]，不打已读标记）。
+
+        folder 传用户可见名（内部自动做线格式转换）。失败抛异常，由调用方提示。
+        """
+        if account.ssl:
+            conn = imaplib.IMAP4_SSL(account.imap_host, account.imap_port,
+                                     timeout=timeout)
+        else:
+            conn = imaplib.IMAP4(account.imap_host, account.imap_port,
+                                 timeout=timeout)
+        try:
+            conn.login(account.email, password)
+            MailClient._send_client_id(conn)
+            conn.select(folder_to_wire(folder), readonly=True)
+            typ, msgdata = conn.uid("fetch", uid, "(BODY.PEEK[])")
+            if typ != "OK" or not msgdata or not msgdata[0] \
+                    or not isinstance(msgdata[0], tuple):
+                raise imaplib.IMAP4.error(f"取邮件原文失败（uid={uid}）")
+            return msgdata[0][1]
+        finally:
+            try:
+                conn.logout()
+            except Exception:
+                pass
+
+
+def folder_to_wire(name: str) -> str:
+    """IMAP 协议层的文件夹名：带引号 + 非 ASCII 名转回修改版 UTF-7。
+
+    imaplib 以 ascii 编码命令且不加引号：中文名会 UnicodeEncodeError，
+    含空格的名字会被拆成多个 atom 被服务器拒绝——都必须在此转换。
+    """
+    if re.search(r"&[0-9A-Za-z,+\-]+-", name):
+        return f'"{name}"'   # 已经是服务器原始 mUTF-7 线格式：原样使用
+    try:
+        name.encode("ascii")
+        return f'"{name}"'
+    except UnicodeEncodeError:
+        return f'"{_encode_mutf7(name)}"'
 
 
 def _decode_mutf7(name: str) -> str:
