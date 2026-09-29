@@ -2,7 +2,7 @@
 
 **OneMail** is a lightweight Windows tray application that receives mail from **multiple mailboxes at once** — every message labeled with the account it came from. Built in Python with a hard focus on a **minimal memory & CPU footprint**.
 
-**一邮通（OneMail）** 是一款 Windows 托盘工具，**同时接收多个邮箱的邮件**，每封邮件都标注来源账户。纯 Python 实现，主打**极低的内存与 CPU 占用**。
+**一邮通（OneMail）** 是一款 Windows 托盘工具，**同时收发多个邮箱的邮件**，每封邮件都标注来源账户。纯 Python 实现，主打**极低的内存与 CPU 占用**。
 
 ---
 
@@ -12,6 +12,10 @@
 |---|---|
 | 📬 Multi-account IMAP fetching | 多账户 IMAP 收信 |
 | 🏷️ Every mail labeled by source account, list filterable per account | 邮件标注来源账户，可按账户筛选 |
+| ✉️ Compose & reply with attachments, sent on a background thread | 写邮件与回复，支持附件，后台线程发送不卡界面 |
+| 📤 Sent-mail sync to the server's Sent folder (best-effort) | 发送后尽力同步到服务器"已发送"文件夹 |
+| 🖥️ Single instance: re-launching the exe brings the window to front | 单实例：再次启动自动唤醒主窗口置前 |
+| 🗂️ Collapsible account panel with unread badges | 账户面板可收起，带未读徽章 |
 | 🔔 Native tray balloon notifications | 系统托盘原生通知 |
 | 🔴 Unread-count badge on the tray icon | 托盘图标未读数角标 |
 | 🔁 IMAP IDLE push with automatic polling fallback | IDLE 推送优先，不支持时自动降级轮询 |
@@ -53,9 +57,9 @@ pyinstaller build.spec --noconfirm
 2. Click **添加账户 / Add Account**, enter your address and **authorization code**.
 3. Done — new mail shows up in the list, labeled by source, with balloon notifications.
 
-**Provider note / 邮箱服务商须知**: QQ Mail / NetEase 163/126 and most Chinese providers require an **authorization code (授权码)** instead of your login password — enable IMAP in the web settings, generate the code, and paste it into OneMail. NetEase additionally requires the IMAP `ID` handshake, which OneMail sends automatically.
+**Provider note / 邮箱服务商须知**: QQ Mail / NetEase 163/126 and most Chinese providers require an **authorization code (授权码)** instead of your login password — enable IMAP **and SMTP** in the web settings, generate the code, and paste it into OneMail. The same code is used for both receiving and sending. NetEase additionally requires the IMAP `ID` handshake, which OneMail sends automatically.
 
-QQ 邮箱、网易 163/126 等国内邮箱需在网页设置中开启 IMAP 并使用**授权码**（不是登录密码）。网易还要求客户端上报 `ID` 命令，OneMail 已自动处理。
+QQ 邮箱、网易 163/126 等国内邮箱需在网页设置中开启 IMAP **和 SMTP** 并使用**授权码**（不是登录密码），收信发信共用同一个授权码。网易还要求客户端上报 `ID` 命令，OneMail 已自动处理。
 
 ## 🔒 Privacy & Security / 隐私与安全
 
@@ -67,18 +71,21 @@ QQ 邮箱、网易 163/126 等国内邮箱需在网页设置中开启 IMAP 并�
 ## 🧱 Tech Overview / 技术概览
 
 - One daemon thread per account: IMAP IDLE long-connection push (blocked socket, zero idle CPU), auto fallback to polling for providers without IDLE
+- SMTP sending on a worker thread: MIME assembled by the stdlib `email` package, RFC 2231-encoded attachment names, best-effort Sent-folder sync
+- Single-instance via Win32 named mutex/event (no third-party IPC)
 - Full stdlib-first design — third-party runtime dependencies are exactly `pystray` + `Pillow`
 - Exponential-backoff reconnect, connection-state verification before every fetch
 - GBK/GB2312/Big5 encoding fallback chain for Chinese mail
 
-每个账户一条守护线程：优先 IDLE 长连接推送（阻塞等待、空闲 CPU 为零），服务器不支持时自动降级轮询；断线指数退避重连；收信前校验连接状态；GBK 等中文编码兜底解析。
+每个账户一条守护线程：优先 IDLE 长连接推送（阻塞等待、空闲 CPU 为零），服务器不支持时自动降级轮询；断线指数退避重连；SMTP 发信跑在独立线程（标准库组装 MIME、中文附件名 RFC 2231 编码、尽力同步已发送文件夹）；单实例经 Win32 命名互斥体实现；GBK 等中文编码兜底解析。
 
-Details in the docs / 详细文档：[English](docs/technical-doc.md) · [中文技术文档](docs/技术文档.md) · [Dev Plan](docs/development-plan.md) · [中文开发计划](docs/开发计划.md)
+Details in the docs / 详细文档：[English](docs/technical-doc.md) · [中文技术文档](docs/技术文档.md) · [Dev Plan](docs/development-plan.md) · [中文开发计划](docs/开发计划.md) · [发邮件开发计划](docs/发邮件开发计划.md)
 
 ## 🗺️ Roadmap / 后续计划
 
 - [ ] OAuth2 for Gmail/Outlook / Gmail 与 Outlook 的 OAuth2 登录
-- [ ] Send & reply / 发信与回复
+- [x] Send & reply / 发信与回复 ✅ v1.1.0
+- [ ] CC/BCC fields, HTML mail / 抄送密送、HTML 富文本
 - [ ] Mail search & filter rules / 邮件搜索与过滤规则
 - [ ] Folder selection / 收信文件夹选择
 

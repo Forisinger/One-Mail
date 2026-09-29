@@ -35,6 +35,8 @@ class Account:
     enabled: bool = True
     idle_supported: bool | None = None   # None=未知，连接后探测
     poll_interval: int = 300             # IDLE 不可用时的轮询间隔
+    smtp_host: str = ""                  # 留空则由 imap_host 推导
+    smtp_port: int = 465                 # SMTP SSL 标准端口
     extra: dict = field(default_factory=dict)
 
     @staticmethod
@@ -44,6 +46,17 @@ class Account:
             if domain.endswith(d):
                 return host, port
         return ("imap." + domain if domain else "", 993)
+
+    def smtp_endpoint(self) -> tuple[str, int]:
+        """SMTP 服务器地址。未显式配置时由 IMAP 主机推导（imap.x → smtp.x）。"""
+        if self.smtp_host:
+            return self.smtp_host, self.smtp_port
+        host = self.imap_host
+        if host.startswith("imap."):
+            host = "smtp." + host[len("imap."):]
+        elif host.startswith("imap"):
+            host = "smtp" + host[len("imap"):]
+        return host, self.smtp_port
 
     def to_dict(self) -> dict:
         return asdict(self)

@@ -8,6 +8,48 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versio
 
 ---
 
+## [1.1.0] — 2026-09-29
+
+Sending mail, single-instance behavior, and UI refinements. · 新增发信能力、单实例行为与界面优化。
+
+### Added · 新增
+
+**English**
+
+- **Compose & send mail**: write new mail from any configured account, with multiple recipients and attachments
+- **Reply**: one click on the toolbar prefills recipient, subject (`回复：…`) and a quoted header of the original mail
+- Compose window runs the SMTP transfer on a worker thread — the UI never freezes, double-sends are locked out
+- Sent-mail sync: after sending, a short IMAP connection tries to APPEND the message to the server's Sent folder; failures degrade silently (NetEase keeps sent mail server-side anyway)
+- Single-instance enforcement: launching the exe again wakes the running app and forces its window to the foreground (Win32 named mutex + named event, zero dependencies)
+- Collapsible account panel: the left "Mailboxes" pane (incl. *All Mail*) folds away via an always-visible edge strip; state persists in `config.json`
+- SMTP endpoints auto-derived from IMAP hosts (`imap.x.com → smtp.x.com:465`), overridable per account
+
+**中文**
+
+- **写信与发信**：用已配置的账户撰写新邮件，支持多收件人与附件
+- **回复**：工具栏一键预填收件人、主题（`回复：…`）与原邮件引用头
+- 写信窗口在后台线程执行 SMTP 发送，界面全程不卡顿，且锁定按钮防止重复发送
+- 已发送同步：发信成功后尝试通过 IMAP 追加到服务器"已发送"文件夹，失败静默降级（网易网页端本就会保存发件记录）
+- 单实例：再次双击 exe 会唤醒已运行实例并把主窗口强制置前（Win32 命名互斥体 + 命名事件，零依赖）
+- 账户面板可收起：窗口左缘常驻细条一键折叠"邮箱账户"栏，状态记忆在 `config.json`
+- SMTP 服务器由 IMAP 主机自动推导（`imap.x.com → smtp.x.com:465`），也可按账户覆盖
+
+### Changed · 变更
+
+**English**
+
+- `Account` model gained `smtp_host`/`smtp_port` fields; old `config.json` files need no migration
+- Toolbar gained "✉ 写邮件 / Compose" and "↩ 回复 / Reply" buttons; real SMTP delivery verified against NetEase 163 (smtp.163.com:465)
+- New offline unit tests for MIME building, address parsing and endpoint derivation (8 cases)
+
+**中文**
+
+- `Account` 模型新增 `smtp_host`/`smtp_port` 字段，旧 `config.json` 无需迁移
+- 工具栏新增「✉ 写邮件」「↩ 回复」按钮；已实测网易 163（smtp.163.com:465）真实投递成功
+- 新增 MIME 组装、地址解析、服务器推导的离线单测（8 例）
+
+---
+
 ## [1.0.0] — 2026-09-28
 
 First public release. · 首个公开发布版本。

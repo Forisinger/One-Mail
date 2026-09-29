@@ -99,6 +99,8 @@ class MainWindow:
 
         for text, cmd in (
             ("⟳ 立即收信", self.fetch_now),
+            ("✉ 写邮件", self.compose_new),
+            ("↩ 回复", self.compose_reply),
             ("✓ 全部已读", self.mark_all_read),
             ("＋ 添加账户", self.add_account),
             ("✎ 编辑账户", self.edit_account),
@@ -353,6 +355,35 @@ class MainWindow:
 
     def add_account(self):
         AccountDialog(self.root, self.manager, on_saved=self._on_account_saved)
+
+    # ---------- 写信 ----------
+    def compose_new(self):
+        from .compose_window import ComposeWindow
+        acc = self._selected_account()
+        ComposeWindow(self.root, self.manager, account=acc)
+
+    def compose_reply(self):
+        """回复选中的邮件：预填收件人/主题/引用头。"""
+        from .compose_window import ComposeWindow
+        sel = self.tree.selection()
+        if not sel:
+            messagebox.showinfo("一邮通", "请先选中要回复的邮件")
+            return
+        mail = db.get_mail(int(sel[0]))
+        if mail is None:
+            return
+        acc = self.manager.get(mail["account_id"])
+        reply_to = mail["from_addr"] or ""
+        subj = mail["subject"] or ""
+        if subj and not subj.startswith(("回复：", "回复:", "Re:", "Re:")):
+            subj = f"回复：{subj}"
+        quote = (f"\n\n-------- 原始邮件 --------\n"
+                 f"发件人：{mail['from_name'] or reply_to} <{reply_to}>\n"
+                 f"时间：{mail['received_at']}\n"
+                 f"主题：{mail['subject'] or ''}\n\n"
+                 f"{mail['body_text'] or ''}\n")
+        ComposeWindow(self.root, self.manager, account=acc, to=reply_to,
+                      subject=subj, body=quote)
 
     def edit_account(self):
         acc = self._selected_account()

@@ -54,18 +54,21 @@
 OneMail/
 ├── docs/                  # this doc, development plan
 ├── src/
-│   ├── main.py            # entry point: engine + UI + tray wiring
+│   ├── main.py            # entry point: single-instance check, engine + UI + tray
 │   ├── core/
-│   │   ├── account.py     # account model, manager, provider presets
+│   │   ├── account.py     # account model (IMAP+SMTP), manager, provider presets
 │   │   ├── mail_client.py # IMAP client (connect/IDLE/poll/reconnect)
+│   │   ├── smtp_client.py # outgoing mail: MIME building, sending, Sent sync
 │   │   ├── parser.py      # MIME parsing: body, attachments, headers
 │   │   ├── scheduler.py   # multi-account scheduling, event fan-out
-│   │   └── security.py    # DPAPI encrypt/decrypt (ctypes)
+│   │   ├── security.py    # DPAPI encrypt/decrypt (ctypes)
+│   │   └── single_instance.py # Win32 named-mutex single instance + wake event
 │   ├── storage/
 │   │   ├── database.py    # SQLite schema & access
 │   │   └── config.py      # config.json read/write
 │   ├── ui/
-│   │   ├── main_window.py # main window (accounts / mail list / reader)
+│   │   ├── main_window.py # main window (collapsible accounts / mail list / reader)
+│   │   ├── compose_window.py # compose window (new mail & reply, threaded send)
 │   │   ├── tray.py        # tray icon, menu, unread badge
 │   │   ├── icon.py        # programmatic icon + badge rendering
 │   │   └── account_dialog.py
@@ -93,14 +96,17 @@ OneMail/
       "ssl": true,
       "enabled": true,
       "idle_supported": false,
-      "poll_interval": 300
+      "poll_interval": 300,
+      "smtp_host": "",
+      "smtp_port": 465
     }
   ],
   "settings": {
     "autostart": true,
     "poll_interval_fallback": 300,
     "notify_sound": true,
-    "start_minimized": true
+    "start_minimized": true,
+    "accounts_collapsed": false
   }
 }
 ```
@@ -136,23 +142,34 @@ CREATE INDEX idx_mails_account ON mails(account_id, received_at DESC);
 - Common Chinese providers (QQ/163/126/Sina/Sohu/Aliyun/139) get preset IMAP hosts; unknown domains guess `imap.<domain>`
 - Encoding fallback chain: `utf-8 → gbk → gb2312 → big5 → latin-1` (Chinese providers send lots of GBK)
 
-### 3. Source labeling
+### 3. Outgoing mail (SMTP, smtp_client.py)
+- SMTP endpoint derived from the IMAP host (`imap.x.com → smtp.x.com:465`, SSL); overridable via `smtp_host`/`smtp_port` on the account
+- `build_mime()` is offline-testable: UTF-8 headers via `email.header`; non-ASCII attachment filenames encoded per RFC 2231 (recipients see them decoded correctly)
+- `send_mail()` runs on a **worker thread** (`SMTP_SSL → login → send_message`); the UI stays responsive and the send button is locked against double-clicks
+- `save_to_sent()` is best-effort: a short IMAP connection probes the Sent/已发送 folder and APPENDs; any failure degrades silently (163 keeps sent mail server-side anyway)
+- SMTP server rejections (554/551 etc.) are surfaced verbatim in the error dialog for easy diagnosis
+
+### 4. Single instance & window wake-up (single_instance.py)
+- A named mutex (`CreateMutexW`) prevents a second instance; the second process signals a named event (`SetEvent`) and exits
+- The running instance deiconifies its window and forces it to foreground (temporary topmost toggle to bypass cross-app focus restrictions)
+
+### 5. Source labeling
 - Data layer: every mail row binds `account_id`
 - UI: mail list shows the account column; left pane groups accounts and filters; notification titles include the account name
 
-### 4. Password security
+### 6. Password security
 - DPAPI `CryptProtectData` (ctypes, no pywin32) → ciphertext hex in `%APPDATA%/OneMail/secrets.bin`
 - Plaintext exists only in memory at runtime; leaked config files reveal no passwords
 
-### 5. Unread badge
+### 7. Unread badge
 - Badge (red circle, count, `99+` cap) rendered with Pillow onto the base icon
 - Tray icon image swapped whenever the global unread count changes
 
-### 6. Auto-start
+### 8. Auto-start
 - Key: `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value `OneMail.exe --minimized`
 - Toggled from settings; writes/deletes the registry value
 
-### 7. Footprint guarantees
+### 9. Footprint guarantees
 - No Electron/Qt/browser engine — tkinter is the whole UI
 - IDLE blocks on the socket = 0% idle CPU; polling accounts wake briefly per interval
 - Body text truncated to 64 KB on ingest to bound DB growth
