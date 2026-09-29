@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
-"""真实 163 IMAP 端到端验证：连接/UIDVALIDITY/增量抓取/水位。
-使用临时数据库，不影响真实 APPDATA 数据。运行：python tools/verify_163.py
+"""真实 163 IMAP 端到端验证：连接/UIDVALIDITY/增量抓取/水位/已读标志往返。
+
+使用临时数据库，不影响真实 APPDATA 数据。
+运行：python tools/verify_163.py [--store]
+  --store  额外验证 v1.7.0 的 STORE 路径：挑一封已读邮件清除再恢复 \\Seen，
+           并用 SEARCH UNSEEN 断言往返成功（非 readonly 短连接真机放行验证）。
 """
 import os
 import sys
@@ -56,6 +60,29 @@ def main():
     print(f"第二轮: uidvalidity={uv2} max_uid={max2} 本地邮件数={total2}")
     assert (uv1, max1) == (uv2, max2) and total1 == total2, \
         "无新邮件时第二轮不应改变水位或数量"
+
+    # --store：已读标志往返（v1.7.0 STORE 路径真机验证，不改任何邮件正文）
+    if "--store" in sys.argv:
+        rows, _ = db.search_mails()
+        read_rows = [r for r in rows if r["is_read"] and r["uid"]]
+        assert read_rows, "--store 需要至少一封已读邮件"
+        uid = read_rows[0]["uid"]
+        folder = read_rows[0]["folder"] or "INBOX"
+        print(f"STORE 往返: uid={uid} folder={folder}")
+        MailClient.mark_seen(acc, pwd, folder, [uid], seen=False)
+        try:
+            # SEARCH 必须作用在与 STORE 相同的 mailbox 上（主连接选的是收信文件夹）
+            conn.select(MailClient.folder_to_wire(folder))
+            typ, data = conn.uid("search", None, "UNSEEN")
+            unseen = (data[0] or b"").split()
+            assert uid.encode() in unseen, "清除 \\Seen 后该 UID 应出现在 UNSEEN"
+        finally:
+            # 兜底恢复：断言失败也不能把真实邮件永久留在未读状态
+            MailClient.mark_seen(acc, pwd, folder, [uid], seen=True)
+        typ, data = conn.uid("search", None, "UNSEEN")
+        unseen2 = (data[0] or b"").split()
+        assert uid.encode() not in unseen2, "恢复 \\Seen 后该 UID 不应再是 UNSEEN"
+        print("STORE 往返: 清除 -> UNSEEN 命中 -> 恢复 -> UNSEEN 消除 ✓")
 
     conn.logout()
     print("VERIFY_OK")

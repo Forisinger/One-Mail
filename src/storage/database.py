@@ -262,12 +262,30 @@ def unread_count(account_id: str | None = None) -> int:
         return conn.execute(sql, args).fetchone()["c"]
 
 
-def unread_rows(account_id: str | None = None) -> list[sqlite3.Row]:
-    """未读邮件的最小字段行 (account_id, folder, uid)，供已读同步投递（v1.7.0）。
+def mark_all_read_synced(account_id: str | None = None) -> list[sqlite3.Row]:
+    """全部标已读，并在**同一事务**内返回同步所需的未读行（v1.8.1）。
 
-    与 unread_count 同口径但不限量：mark_all_read 前必须取到完整未读集合，
-    截断会造成"本地已读、服务器永久未读"且无自愈。
+    先 SELECT 未读 (account_id, folder, uid) 再 UPDATE 置已读——若无事务包裹，
+    间隙中入库的新邮件会被置已读却不在投递集合里，造成"本地已读、服务器
+    永久未读"且水位机制不会自愈。rows 供 flag_sync 投递。
     """
+    with _LOCK, _conn() as conn:
+        if account_id:
+            rows = conn.execute(
+                "SELECT account_id, folder, uid FROM mails "
+                "WHERE is_read=0 AND account_id=?", (account_id,)).fetchall()
+            conn.execute("UPDATE mails SET is_read=1 WHERE account_id=?",
+                         (account_id,))
+        else:
+            rows = conn.execute(
+                "SELECT account_id, folder, uid FROM mails "
+                "WHERE is_read=0").fetchall()
+            conn.execute("UPDATE mails SET is_read=1")
+        return rows
+
+
+def unread_rows(account_id: str | None = None) -> list[sqlite3.Row]:
+    """未读邮件的最小字段行 (account_id, folder, uid)，供已读同步投递（v1.7.0）。"""
     sql, args = "SELECT account_id, folder, uid FROM mails WHERE is_read=0", ()
     if account_id:
         sql, args = ("SELECT account_id, folder, uid FROM mails "

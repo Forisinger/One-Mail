@@ -598,11 +598,10 @@ class MainWindow:
         """
         if account_id == "__filter__":
             account_id = self._filter_account
-        # 先取未读行的最小字段集投递同步任务（改库后就查不到了），再更新本地。
-        # 不带 limit：截断会造成"本地已读、服务器永久未读"且无自愈
-        rows = db.unread_rows(account_id)
+        # 同事务内取未读行 + 置已读（v1.8.1）：间隙入库的新邮件不会被
+        # "已读但漏投递"，造成本地/服务器永久不一致
+        rows = db.mark_all_read_synced(account_id)
         self._sync_read_flags(rows, seen=True)
-        db.mark_all_read(account_id)
         self.full_refresh()
         self.root.event_generate("<<UnreadChanged>>", when="tail")
 
@@ -625,8 +624,8 @@ class MainWindow:
         if not sel:
             return
         mail = db.get_mail(int(sel[0]))
-        if mail is None:
-            return
+        if mail is None or not mail["is_read"]:
+            return  # 已是未读：短路，免一次无谓的服务器短连接
         db.mark_read(mail["id"], read=False)
         self._sync_read_flags([mail], seen=False)
         self.refresh_mails()

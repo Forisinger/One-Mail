@@ -172,14 +172,22 @@ class AccountDialog(tk.Toplevel):
         name = self.var_name.get().strip() or email_addr
         folder = self.var_folder.get().strip() or "INBOX"
         if self.account:
-            self.account.name = name
-            self.account.email = email_addr
-            self.account.imap_host = host
-            self.account.imap_port = port
-            self.account.ssl = self.var_ssl.get()
-            self.account.folder = folder
-            self.manager.update(self.account, password=password)
-            acc, pwd = self.account, password
+            # v1.8.1：构造全新 Account 原子替换（update 内整体覆盖 dict 条目），
+            # 避免逐字段原地赋值被收信/flag_sync 线程读到"新 host + 旧 port"撕裂组合
+            old = self.account
+            conn_changed = (old.imap_host, old.imap_port, old.ssl) != \
+                (host, port, self.var_ssl.get())
+            new_acc = Account(
+                id=old.id, name=name, email=email_addr,
+                imap_host=host, imap_port=port, ssl=self.var_ssl.get(),
+                enabled=old.enabled, folder=folder,
+                idle_supported=None if conn_changed else old.idle_supported,
+                poll_interval=old.poll_interval,
+                smtp_host=old.smtp_host, smtp_port=old.smtp_port,
+                extra=old.extra,
+            )
+            self.manager.update(new_acc, password=password)
+            acc, pwd = new_acc, password
         else:
             acc = self.manager.add(name, email_addr, password,
                                    imap_host=host, imap_port=port,

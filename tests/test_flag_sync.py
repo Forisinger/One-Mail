@@ -107,30 +107,24 @@ class FlagSyncTests(unittest.TestCase):
         self.assertEqual(h.calls[0][2][0], "1")
         self.assertEqual(h.calls[2][2][-1], "120")
 
-    def test_retry_once_then_success(self):
-        """首次失败重试一次后成功。"""
+    def test_inline_retry_then_success(self):
+        """首次失败组内内联重试一次后成功；不回队（保序）。"""
         h = _Harness(fail_first=1)
         fs = h.make()
         try:
             fs._process_batch([("a1", "INBOX", "7", True, 0)])
-            self.assertEqual(len(h.calls), 1)          # 第一次失败
-            self.assertEqual(fs._queue.qsize(), 1)     # 已重试入队
-            job = fs._queue.get_nowait()
-            self.assertEqual(job[3], True)             # seen 保留
-            self.assertEqual(job[4], 1)                # attempts+1
-            fs._process_batch([job])
-            self.assertEqual(len(h.calls), 2)          # 重试成功
+            self.assertEqual(len(h.calls), 2)          # 失败 + 内联重试成功
+            self.assertEqual(fs._queue.qsize(), 0)     # 绝不回队
+            self.assertNotIn(("a1", "INBOX", "7", True), fs._pending)
         finally:
             _stop(fs)
 
-    def test_drop_after_second_failure(self):
-        """连续两次失败后丢弃，不再入队。"""
+    def test_drop_after_inline_retry_fails(self):
+        """内联重试仍失败：丢弃并释放去重键。"""
         h = _Harness(fail_first=2)
         fs = h.make()
         try:
             fs._process_batch([("a1", "INBOX", "7", True, 0)])
-            job = fs._queue.get_nowait()
-            fs._process_batch([job])
             self.assertEqual(len(h.calls), 2)
             self.assertEqual(fs._queue.qsize(), 0)     # 丢弃
             self.assertNotIn(("a1", "INBOX", "7", True), fs._pending)
@@ -180,19 +174,16 @@ class FlagSyncTests(unittest.TestCase):
             fs.stop()
 
     def test_partial_chunk_retry(self):
-        """多块时只有失败块重试，成功块立即释放键。"""
+        """多块时只有失败块内联重试，成功块不重发。"""
         uids = [str(i) for i in range(1, 61)]   # 60 个 -> 50 + 10 两块
-        h = _Harness(fail_first=1)              # 第一块（50 个）失败
+        h = _Harness(fail_first=1)              # 第一块首次失败
         fs = h.make()
         try:
-            fs._process_batch([( "a1", "INBOX", u, True, 0) for u in uids])
-            self.assertEqual(len(h.calls), 2)          # 两块各调一次
-            self.assertEqual(fs._queue.qsize(), 50)    # 仅失败块重试
-            retried = {fs._queue.get_nowait()[2] for _ in range(50)}
-            self.assertEqual(retried, {str(i) for i in range(1, 51)})
-            # 第二块（10 个）的键已释放
-            for u in range(51, 61):
-                self.assertNotIn(("a1", "INBOX", str(u), True), fs._pending)
+            fs._process_batch([("a1", "INBOX", u, True, 0) for u in uids])
+            self.assertEqual(len(h.calls), 3)          # 失败 + 重试 + 第二块
+            self.assertEqual([len(c[2]) for c in h.calls], [50, 50, 10])
+            self.assertEqual(fs._queue.qsize(), 0)     # 无回队任务
+            self.assertEqual(fs._pending, set())       # 全部键已释放
         finally:
             fs.stop()
 

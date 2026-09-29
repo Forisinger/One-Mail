@@ -7,14 +7,13 @@
 - UI 线程只投递任务（submit），网络操作全部在后台线程，永不阻塞界面。
 - 任务按 (account, folder, seen) 分组、UID 数值排序、50 个一批成批 STORE——
   "全部已读"也是每 (账户, 文件夹) 一次连接，绝不每封一连。
-- 失败按块重试 1 次后丢弃：已读同步是幂等操作，丢弃无害（下次标记会再触发），
-  无限重试反而会堆积任务、反复打扰服务器。
+- 失败在组内**内联重试 1 次**后丢弃并记日志：不把失败任务重新入队——
+  重试回队会排在用户新操作（如"标已读后立刻标未读"）后面，导致服务器端
+  写序与用户最后意图相反且无自愈；内联重试不跨越任务边界，天然保序。
+  已读同步本身幂等，最终丢弃无丢失风险（下次标记会再触发）。
 - 任何异常路径都必须释放去重键（_forget）：宁可少同步一封（幂等、可再触发），
   也不能让键泄漏导致该邮件的后续同步请求被永久静默吞掉。
 - connector / get_credentials / enabled 全部可注入 → 核心逻辑可离线单测。
-
-已知接受的边界：seen 方向反转的窄竞态（标已读→立刻标未读）理论上可能以
-后到的写回收尾；当前 UI 只有"标已读"入口，出现概率可忽略，暂不为此加序号机制。
 """
 from __future__ import annotations
 
@@ -128,7 +127,6 @@ class FlagSync:
         if not uids:
             self._forget(account_id, folder, all_uids, seen)
             return
-        attempts = max(a for _, a in uid_list)
 
         # 以下任何提前返回路径都必须先释放去重键
         try:
@@ -151,7 +149,7 @@ class FlagSync:
             self._forget(account_id, folder, uids, seen)
             return
 
-        # 块级失败收集：成功块不重发（幂等但省流量）
+        # 块级失败收集 + 组内内联重试：成功块不重发；重试不回队（保序）
         failed: list[str] = []
         err: Exception | None = None
         for i in range(0, len(uids), CHUNK_SIZE):
@@ -159,24 +157,21 @@ class FlagSync:
             try:
                 self._connector(account, password, folder, chunk, seen)
             except Exception as e:
-                failed.extend(chunk)
                 err = e
-        if not failed:
-            self._forget(account_id, folder, uids, seen)
-            return
-        self._log(f"flag_sync: {getattr(account, 'email', account_id)} "
-                  f"{folder} 同步 {'已读' if seen else '未读'} 失败"
-                  f"（{len(failed)}/{len(uids)} 封）: "
-                  f"{type(err).__name__}: {err}")
-        if attempts < 1:
-            # 重试失败块一次；成功块立即释放键
-            ok = [u for u in uids if u not in set(failed)]
-            self._forget(account_id, folder, ok, seen)
-            for u in failed:
-                self._queue.put((account_id, folder, u, seen, attempts + 1))
-        else:
-            self._log("flag_sync: 重试仍失败，任务丢弃（幂等，无丢失风险）")
-            self._forget(account_id, folder, uids, seen)
+                try:
+                    # 内联重试一次：不跨越任务边界，避免与其他方向的
+                    # 新任务交错造成服务器端写序与用户意图相反
+                    self._connector(account, password, folder, chunk, seen)
+                except Exception as e2:
+                    err = e2
+                    failed.extend(chunk)
+        self._forget(account_id, folder, uids, seen)
+        if failed:
+            self._log(f"flag_sync: {getattr(account, 'email', account_id)} "
+                      f"{folder} 同步 {'已读' if seen else '未读'} 失败"
+                      f"（{len(failed)}/{len(uids)} 封，已重试 1 次）: "
+                      f"{type(err).__name__}: {err}")
+            self._log("flag_sync: 任务丢弃（幂等，无丢失风险；下次标记会再触发）")
 
     def _forget(self, account_id: str, folder: str, uids, seen: bool) -> None:
         with self._lock:

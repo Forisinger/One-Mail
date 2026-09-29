@@ -101,18 +101,21 @@ def save_password(account_id: str, password: str) -> None:
 
 
 def load_password(account_id: str) -> str:
-    if not os.path.exists(_SECRETS):
-        return ""
-    try:
-        store = json.loads(_read_secrets())
-        val = store.get(account_id, "")
-        if not val:
+    # 也持锁：flag_sync 后台线程会并发读取；若与 save/delete 的 os.replace
+    # 重叠，Windows 上打开中的文件会令 replace 抛 PermissionError（写侧失败）
+    with _LOCK:
+        if not os.path.exists(_SECRETS):
             return ""
-        if _DPAPI:
-            return _dpapi_unprotect(bytes.fromhex(val)).decode("utf-8")
-        return val
-    except Exception:
-        return ""
+        try:
+            store = json.loads(_read_secrets())
+            val = store.get(account_id, "")
+            if not val:
+                return ""
+            if _DPAPI:
+                return _dpapi_unprotect(bytes.fromhex(val)).decode("utf-8")
+            return val
+        except Exception:
+            return ""
 
 
 def delete_password(account_id: str) -> None:

@@ -8,6 +8,32 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versio
 
 ---
 
+## [1.8.1] — 2026-09-29
+
+Hardening round 2 (agent review): write-order, locking & transaction fixes. · 第二轮复查加固：写序、加锁与事务。
+
+### Fixed · 修复
+
+**English**
+
+- Flag-sync retries are now inlined within the group instead of re-queued: a re-queued retry could land *after* a newer opposite-direction task (mark read → immediately mark unread) and leave the server flag opposite to the user's last intent, permanently inconsistent
+- `mark_all_read` now selects the pending rows and flips the flags inside one SQLite transaction — mails arriving in the gap can no longer end up "read locally, unread on server forever" (the watermark would never revisit them)
+- `load_password` now takes the secrets lock: the flag-sync worker thread could race `os.replace` in `save/delete_password` on Windows and make account saving fail with PermissionError
+- Editing an account builds a brand-new `Account` and swaps it atomically instead of mutating fields in place, so worker threads can never observe a torn "new host + old port" combination (IDLE probe resets when connection settings change)
+- "Mark as unread" short-circuits when the mail is already unread (no pointless server round-trip)
+- `tools/verify_163.py --store`: live-mailbox round-trip for the STORE path (clear `\Seen` → assert SEARCH UNSEEN → restore → assert gone), verifying real-server permission for non-readonly writes
+
+**中文**
+
+- 已读同步重试改为组内**内联**执行，不再回队：回队的重试可能排到用户新的反方向任务之后（标已读→立刻标未读），导致服务器端标志与用户最后意图相反且永不自愈
+- 「全部已读」改为同一 SQLite 事务内先取未读行再置已读——间隙入库的新邮件不会再出现"本地已读、服务器永久未读"（水位机制不会重访它们）
+- `load_password` 补上 secrets 锁：flag_sync 后台线程与 `save/delete_password` 的 `os.replace` 在 Windows 上并发会使保存账户报 PermissionError
+- 编辑账户改为构造全新 `Account` 原子替换，后台线程不会再读到"新 host + 旧 port"的撕裂组合（连接参数变化时 IDLE 探测状态重置）
+- 「标记为未读」对已是未读的邮件短路，不再发起无谓的服务器短连接
+- `tools/verify_163.py --store`：真机验证 STORE 路径（清除 `\Seen` → 断言 SEARCH UNSEEN 命中 → 恢复 → 断言消除），确认非 readonly 写在真实服务器上放行
+
+---
+
 ## [1.8.0] — 2026-09-29
 
 Mark as unread (local + server). · 标记为未读（本地 + 服务器同步）。
@@ -25,6 +51,7 @@ Mark as unread (local + server). · 标记为未读（本地 + 服务器同步�
 - 服务器写入沿用已读同步的去重/成批/托盘开关；开关关闭时只改本地
 
 ---
+
 
 ## [1.7.0] — 2026-09-29
 
@@ -57,6 +84,7 @@ Server read-flag sync. · 本地已读状态同步到服务器。
 ---
 
 
+
 ## [1.6.2] — 2026-09-29
 
 Per-account connection status in the account panel. · 账户面板显示各账户最近连接状态。
@@ -72,6 +100,7 @@ Per-account connection status in the account panel. · 账户面板显示各账�
 - 账户卡片内联显示最近连接状态（已连接 / 收到新邮件推送 / 轮询中 / 连接异常…），异常账户一眼可见，不再只靠状态栏一闪而过的文字
 
 ---
+
 
 
 
@@ -103,6 +132,7 @@ Third review pass fixes over the save-attachment and folder-wire changes. · 三
 
 
 
+
 ## [1.6.0] — 2026-09-29
 
 Attachment saving from the reading pane (on-demand server re-fetch). · 阅读区保存附件（按需从服务器重新取原文）。
@@ -125,6 +155,7 @@ Attachment saving from the reading pane (on-demand server re-fetch). · 阅读�
 
 
 
+
 ## [1.5.2] — 2026-09-29
 
 Sortable columns and a real-mailbox end-to-end verification tool. · 列头排序与真实邮箱端到端验证工具。
@@ -142,6 +173,7 @@ Sortable columns and a real-mailbox end-to-end verification tool. · 列头排�
 - `tools/verify_163.py`：真实邮箱端到端验证工具（临时数据库，只读效果）——连接、UIDVALIDITY 读取、文件夹列表 mUTF-7 解码、增量抓取水位行为。已对网易 163 实测：6 个文件夹中文名解码正确（草稿箱/已发送/垃圾邮件…），第一轮抓取 4 封未读，第二轮 0 下载且水位不变
 
 ---
+
 
 
 
@@ -195,6 +227,7 @@ Incremental fetching (no more re-downloading all unseen mail) and attachment nam
 
 
 
+
 ## [1.5.0] — 2026-09-29
 
 Incremental fetching (no more re-downloading all unseen mail) and attachment names in the reading pane. · 增量收信（不再反复整封下载未读邮件）与阅读区附件名展示。
@@ -216,6 +249,7 @@ Incremental fetching (no more re-downloading all unseen mail) and attachment nam
 - 托盘角标数字改用 TrueType 字体（64px 下更大更清晰，失败回退）；无 Shell/托盘环境优雅降级；启动时逐个提示全部缺授权码的账户
 
 ---
+
 
 
 
@@ -277,6 +311,7 @@ Hardening release from a three-way multi-agent code audit: data-loss prevention,
 
 
 
+
 ## [1.3.0] — 2026-09-29
 
 Full-text search with filters, and per-account receive-folder selection. · 全文搜索与过滤，账户级收信文件夹选择。
@@ -319,6 +354,7 @@ Full-text search with filters, and per-account receive-folder selection. · 全�
 
 
 
+
 ## [1.2.0] — 2026-09-29
 
 CC/BCC recipients and rich-text (HTML) composing. · 抄送/密送与 HTML 富文本写信。
@@ -357,6 +393,7 @@ CC/BCC recipients and rich-text (HTML) composing. · 抄送/密送与 HTML 富�
 
 
 
+
 ## [1.1.1] — 2026-09-29
 
 Copy-anywhere support and a friendlier launch behavior. · 全局复制能力与更友好的启动行为。
@@ -392,6 +429,7 @@ Copy-anywhere support and a friendlier launch behavior. · 全局复制能力与
 - `start_minimized` 配置键保留兼容，但不再决定启动时是否显示窗口
 
 ---
+
 
 
 
@@ -436,6 +474,7 @@ Sending mail, single-instance behavior, and UI refinements. · 新增发信能�
 - 新增 MIME 组装、地址解析、服务器推导的离线单测（8 例）
 
 ---
+
 
 
 
