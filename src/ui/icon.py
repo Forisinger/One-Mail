@@ -5,9 +5,19 @@
 """
 from __future__ import annotations
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 _SIZE = 64
+
+
+def _badge_font():
+    """角标数字字体：TrueType 更大更清晰，失败回退 Pillow 默认点阵。"""
+    for name in ("segoeuib.ttf", "arialbd.ttf", "arial.ttf"):
+        try:
+            return ImageFont.truetype(name, 24)
+        except OSError:
+            continue
+    return ImageFont.load_default()
 
 
 def base_icon() -> Image.Image:
@@ -36,8 +46,14 @@ def with_badge(count: int) -> Image.Image:
     cx, cy = _SIZE - r - 2, r + 2
     d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(230, 50, 50, 255),
               outline=(255, 255, 255, 255), width=2)
-    # 文字居中
-    bbox = d.textbbox((0, 0), label)
+    # 文字居中（缓存字体避免每次重绘都扫字体文件）
+    global _FONT_CACHE
+    try:
+        font = _FONT_CACHE
+    except NameError:
+        font = _FONT_CACHE = _badge_font()
+    bbox = d.textbbox((0, 0), label, font=font)
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    d.text((cx - tw / 2 - bbox[0], cy - th / 2 - bbox[1]), label, fill=(255, 255, 255, 255))
+    d.text((cx - tw / 2 - bbox[0], cy - th / 2 - bbox[1]), label,
+           fill=(255, 255, 255, 255), font=font)
     return img

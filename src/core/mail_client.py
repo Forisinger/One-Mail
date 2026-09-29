@@ -18,6 +18,7 @@ import time
 import traceback
 
 from .parser import parse_raw
+from storage import database
 
 _IMAP4_PORT_SSL = 993
 _IDLE_REFRESH = 24 * 60          # IDLE 保活周期（秒）
@@ -259,17 +260,44 @@ class MailClient:
 
     # ---------- 收信 ----------
     def _fetch_new(self, conn):
-        """抓取服务器上未读（UNSEEN）邮件，经解析去重后入库回调。"""
+        """抓取服务器上未读（UNSEEN）邮件，经解析去重后入库回调。
+
+        增量下载：UNSEEN 在 readonly 下永不清零，若不加过滤，每个 IDLE
+        周期都会把全部未读邮件原文重新下载一遍。这里按 (uidvalidity,
+        max_uid) 只对超过已抓取最大 UID 的邮件做 FETCH——SEARCH 很便宜
+        （服务端执行），昂贵的原文下载只发生在新邮件上。
+        """
         if conn.state != "SELECTED":
             raise imaplib.IMAP4.abort(f"收信前连接状态异常(state={conn.state})")
+        folder = self._folder()
         typ, data = conn.uid("search", None, "UNSEEN")
         if typ != "OK" or not data or not data[0]:
             return
         uids = data[0].split()
+
+        # SELECT 后 imaplib 会把 UIDVALIDITY 存进 untagged_responses
+        uv_vals = conn.untagged_responses.get("UIDVALIDITY") or []
+        try:
+            uidvalidity = int(uv_vals[-1]) if uv_vals else 0
+        except (TypeError, ValueError):
+            uidvalidity = 0
+        old_uv, max_uid = database.get_folder_state(self.account.id, folder)
+        if old_uv and uidvalidity and old_uv != uidvalidity:
+            # UID 复用：清掉本地缓存重新对账，防止新旧邮件错配
+            database.delete_account_mails(self.account.id)
+            max_uid = 0
+        elif uidvalidity:
+            database.set_folder_state(self.account.id, folder,
+                                      uidvalidity, max_uid)
+
         batch = []
+        fetched_max = 0
         for uid in uids:
             if self._stop.is_set():
                 break
+            uid_num = int(uid)
+            if uid_num <= max_uid:
+                continue            # 本地已有该 UID 的缓存，跳过原文下载
             typ, msgdata = conn.uid("fetch", uid, "(BODY.PEEK[])")
             if (typ != "OK" or not msgdata or not msgdata[0]
                     or not isinstance(msgdata[0], tuple)):
@@ -277,6 +305,7 @@ class MailClient:
             raw = msgdata[0][1]
             parsed = parse_raw(raw)
             parsed_uid = uid.decode()
+            fetched_max = max(fetched_max, uid_num)
             batch.append({
                 "uid": parsed_uid,
                 "message_id": parsed.message_id,
@@ -287,6 +316,10 @@ class MailClient:
                 "body_text": parsed.body_text,
                 "attachment_names": parsed.attachment_names,
             })
+        if fetched_max and uidvalidity:
+            # 只记录实际完成抓取的最大 UID：中断的批次下轮会续抓
+            database.set_folder_state(self.account.id, folder,
+                                      uidvalidity, fetched_max)
         if batch:
             self._on_new_mail(self.account, batch)
 

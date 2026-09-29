@@ -2,6 +2,7 @@
 """SQLite 邮件缓存与账户镜像。单文件、零配置。"""
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import threading
@@ -112,6 +113,45 @@ def init() -> None:
     with _LOCK, _conn() as conn:
         _migrate(conn)
         conn.executescript(_SCHEMA)
+        # 增列兼容：attachment_names 为 v1.5.0 新增
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(mails)")}
+        if "attachment_names" not in cols:
+            conn.execute("ALTER TABLE mails ADD COLUMN attachment_names TEXT")
+
+
+# 增量收信状态：每账户每文件夹记录 UIDVALIDITY 与已抓取的最大 UID
+_STATE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS folder_state (
+    account_id TEXT NOT NULL,
+    folder TEXT NOT NULL,
+    uidvalidity INTEGER DEFAULT 0,
+    max_uid INTEGER DEFAULT 0,
+    PRIMARY KEY(account_id, folder)
+);
+"""
+
+
+def get_folder_state(account_id: str, folder: str) -> tuple[int, int]:
+    """返回 (uidvalidity, max_uid)，无记录为 (0, 0)。"""
+    with _LOCK, _conn() as conn:
+        conn.executescript(_STATE_SCHEMA)
+        row = conn.execute(
+            "SELECT uidvalidity, max_uid FROM folder_state"
+            " WHERE account_id=? AND folder=?", (account_id, folder)).fetchone()
+    return (row["uidvalidity"], row["max_uid"]) if row else (0, 0)
+
+
+def set_folder_state(account_id: str, folder: str,
+                     uidvalidity: int, max_uid: int) -> None:
+    with _LOCK, _conn() as conn:
+        conn.executescript(_STATE_SCHEMA)
+        conn.execute(
+            """INSERT INTO folder_state (account_id, folder, uidvalidity, max_uid)
+               VALUES (?,?,?,?)
+               ON CONFLICT(account_id, folder)
+               DO UPDATE SET uidvalidity=excluded.uidvalidity,
+                             max_uid=excluded.max_uid""",
+            (account_id, folder, uidvalidity, max_uid))
 
 
 def insert_mails(account_id: str, mails: list[dict],
@@ -125,14 +165,15 @@ def insert_mails(account_id: str, mails: list[dict],
             cur = conn.execute(
                 """INSERT OR IGNORE INTO mails
                    (account_id, uid, folder, message_id, from_addr, from_name, subject,
-                    body_text, has_attachment, received_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    body_text, has_attachment, received_at, attachment_names)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     account_id, m["uid"], folder or "INBOX", m.get("message_id", ""),
                     m.get("from_addr", ""), m.get("from_name", ""),
                     m.get("subject", ""), m.get("body_text", ""),
                     1 if m.get("attachment_names") else 0,
                     m.get("received_at", ""),
+                    json.dumps(m.get("attachment_names") or [], ensure_ascii=False),
                 ),
             )
             if cur.rowcount > 0:
@@ -228,3 +269,5 @@ def unread_count(account_id: str | None = None) -> int:
 def delete_account_mails(account_id: str) -> None:
     with _LOCK, _conn() as conn:
         conn.execute("DELETE FROM mails WHERE account_id=?", (account_id,))
+        conn.executescript(_STATE_SCHEMA)
+        conn.execute("DELETE FROM folder_state WHERE account_id=?", (account_id,))

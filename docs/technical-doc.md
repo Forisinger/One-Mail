@@ -195,7 +195,13 @@ CREATE INDEX idx_mails_account ON mails(account_id, received_at DESC);
 - **UI**: account editing keeps the stored auth code when the password field is left empty; richtext walks Tcl indices (emoji-safe); dialog worker threads never touch tk variables; context menus destroyed after popup; confirm dialog when closing during send
 - **Misc**: 15 s IMAP connect timeout everywhere; local delete (right-click/Delete, server untouched); outbound mail gets `Date`/`Message-ID`; 300 ms search debounce; save_to_sent decodes modified-UTF-7 folder names (163 已发送 sync finally works); single-instance treats a NULL mutex handle as failure; migration is idempotent (`DROP TABLE IF EXISTS mails_new` + `BEGIN IMMEDIATE` + missing-column fallbacks)
 
-### 13. Footprint guarantees
+### 13. Incremental fetch & attachments (v1.5.0)
+- **folder_state table**: per (account, folder) `UIDVALIDITY` + highest fetched UID; the UNSEEN search is unchanged (cheap, server-side) but FETCH runs only for UIDs above the watermark — with readonly+PEEK the server-side UNSEEN never clears, so every push/poll used to re-download all unseen bodies
+- **Resumable**: max_uid counts only fully fetched UIDs (interrupted batches resume); a UIDVALIDITY change clears that folder's cache and resyncs, guarding against UID reuse
+- **Attachment names**: `mails.attachment_names TEXT` column (auto-ALTER via PRAGMA check), stored as JSON, shown in the reading pane
+- **Misc**: tray degrades gracefully without a shell; badge digits use a TrueType font with fallback; all accounts missing auth codes are prompted chain-wise at startup
+
+### 14. Footprint guarantees
 - No Electron/Qt/browser engine — tkinter is the whole UI
 - IDLE blocks on the socket = 0% idle CPU; polling accounts wake briefly per interval
 - Body text truncated to 64 KB on ingest to bound DB growth

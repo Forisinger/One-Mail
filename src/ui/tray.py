@@ -29,7 +29,12 @@ class Tray:
             title="一邮通 OneMail",
             menu=self._build_menu(),
         )
-        self.icon.run_detached()
+        try:
+            self.icon.run_detached()
+        except Exception:
+            # 无托盘/Shell 环境（如 Server Core）：降级为无托盘运行，
+            # 主窗口功能不受影响
+            self.icon = None
 
     def _build_menu(self) -> pystray.Menu:
         return pystray.Menu(

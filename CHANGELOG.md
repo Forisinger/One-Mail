@@ -8,6 +8,28 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versio
 
 ---
 
+## [1.5.0] — 2026-09-29
+
+Incremental fetching (no more re-downloading all unseen mail) and attachment names in the reading pane. · 增量收信（不再反复整封下载未读邮件）与阅读区附件名展示。
+
+### Added · 新增
+
+**English**
+
+- **Incremental fetch**: a new `folder_state` table records `UIDVALIDITY` + the highest fetched UID per account/folder; the (cheap, server-side) UNSEEN search is unchanged, but only UIDs above the watermark are actually downloaded. A mailbox with hundreds of old unread mail no longer re-downloads everything on every push/poll cycle; interrupted batches resume from the last fully fetched UID
+- **UIDVALIDITY handling**: if the server resets UIDs, the folder's local cache is cleared and resynced, preventing new mail from being deduplicated against recycled UIDs
+- **Attachment names in the reading pane**: the `mails` table gains an `attachment_names` column (auto-ALTER for old DBs) and the reading pane shows `📎 附件：a.pdf、b.zip`
+- Tray badge digits now render with a TrueType font (larger/clearer at 64 px, graceful fallback); the tray degrades gracefully on systems without a shell; all accounts missing auth codes are prompted one after another at startup
+
+**中文**
+
+- **增量收信**：新增 `folder_state` 表，按账户/文件夹记录 `UIDVALIDITY` + 已抓取最大 UID；UNSEEN 搜索照旧（服务端执行、开销极小），但只有超过水位的 UID 才真正下载原文。几百封旧未读的邮箱不再在每次推送/轮询时全部重新下载；中断的批次从最后完整抓取的 UID 续传
+- **UIDVALIDITY 处理**：服务器重置 UID 时清空该文件夹本地缓存重新对账，防止 UID 复用导致新旧邮件错配去重
+- **阅读区附件名**：`mails` 表新增 `attachment_names` 列（旧库自动 ALTER），阅读区显示「📎 附件：a.pdf、b.zip」
+- 托盘角标数字改用 TrueType 字体（64px 下更大更清晰，失败回退）；无 Shell/托盘环境优雅降级；启动时逐个提示全部缺授权码的账户
+
+---
+
 ## [1.4.0] — 2026-09-29
 
 Hardening release from a three-way multi-agent code audit: data-loss prevention, concurrency fixes, and UI robustness. · 基于三路多 Agent 代码审查的加固版本：防丢数据、并发修复与 UI 健壮性。

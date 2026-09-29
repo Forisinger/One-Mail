@@ -25,6 +25,7 @@
 | 🔔 Native tray balloon notifications | 系统托盘原生通知 |
 | 🔴 Unread-count badge on the tray icon | 托盘图标未读数角标 |
 | 🔁 IMAP IDLE push with automatic polling fallback | IDLE 推送优先，不支持时自动降级轮询 |
+| ⚡ Incremental fetching — old unseen mail is never re-downloaded | 增量收信——旧未读邮件不会被反复下载 |
 | 🔒 Passwords encrypted with Windows DPAPI — never stored in plaintext | 密码经 Windows DPAPI 加密，绝不明文落盘 |
 | 💾 SQLite local cache, mail history survives restarts | SQLite 本地缓存，重启不丢邮件 |
 | 🚀 Auto-start on boot (registry Run key, no admin needed) | 开机自启（用户级注册表，无需管理员） |

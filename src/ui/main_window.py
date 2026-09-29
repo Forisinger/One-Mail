@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import json
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -359,6 +360,13 @@ class MainWindow:
                              f"来自 {mail['from_name']} <{mail['from_addr']}>"
                              f"　·　{mail['received_at']}"
                              f"　·　来源：{acc_name}\n", "meta")
+        try:
+            att_names = json.loads(mail["attachment_names"]) \
+                if mail["attachment_names"] else []
+        except (json.JSONDecodeError, TypeError):
+            att_names = []
+        if att_names:
+            self.txt_body.insert("end", f"📎 附件：{'、'.join(att_names)}\n", "meta")
         self.txt_body.insert("end", "─" * 60 + "\n\n", "divider")
         self.txt_body.insert("end", body, "body")
         self.txt_body.configure(state="disabled")
@@ -504,13 +512,17 @@ class MainWindow:
                       on_saved=lambda a, p: self._on_account_saved(a, p))
 
     def prompt_missing_password(self):
-        """启动时若有账户缺密码，自动弹出编辑框录入授权码。"""
+        """启动时若有账户缺密码，自动弹出编辑框录入授权码（保存后继续下一个）。"""
         for acc in self.manager.all():
             if acc.enabled and not self.manager.password(acc.id):
                 self.var_status.set(f"账户 {acc.name} 缺少授权码，请输入")
+
+                def _after_saved(a, p):
+                    self._on_account_saved(a, p)
+                    self.prompt_missing_password()   # 链式处理剩余缺码账户
                 AccountDialog(self.root, self.manager, account=acc,
-                              on_saved=lambda a, p: self._on_account_saved(a, p))
-                return
+                              on_saved=_after_saved)
+                return  # 模态对话框一次只能弹一个
 
     def _selected_account(self) -> Account | None:
         if self._filter_account is None:
