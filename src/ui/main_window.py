@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -74,6 +75,9 @@ class MainWindow:
         self._filter_account: str | None = None   # None = 全部账户
         self._search_var = tk.StringVar()
         self._filter_var = tk.StringVar(value="全部")
+        self._sort_key = "date"      # 列头排序（v1.5.2）
+        self._sort_desc = True
+        self._col_titles = {}
         self._account_rows: list[tuple[tk.Frame, str | None]] = []
         self._collapsed = bool(
             config_store.load().get("settings", {}).get("accounts_collapsed", False)
@@ -178,7 +182,9 @@ class MainWindow:
             ("subject", "主题", 380, "w"),
             ("date", "时间", 140, "w"),
         ):
-            self.tree.heading(cid, text=text)
+            self._col_titles[cid] = text
+            self.tree.heading(cid, text=text,
+                              command=lambda c=cid: self._on_sort(c))
             self.tree.column(cid, width=width, anchor=anchor,
                              stretch=(cid == "subject"))
         vsb = ttk.Scrollbar(frame_top, orient="vertical", command=self.tree.yview)
@@ -248,6 +254,35 @@ class MainWindow:
                  pady=5).pack(fill="x")
 
     # ---------- 数据刷新 ----------
+    def _on_sort(self, cid: str):
+        """点击列头排序：再次点击同列反转方向，列头带 ▲/▼ 指示。"""
+        if self._sort_key == cid:
+            self._sort_desc = not self._sort_desc
+        else:
+            self._sort_key, self._sort_desc = cid, False
+        for c, base in self._col_titles.items():
+            mark = ""
+            if c == self._sort_key:
+                mark = " ▼" if self._sort_desc else " ▲"
+            self.tree.heading(c, text=base + mark)
+        self.refresh_mails()
+
+    def _sort_rows(self, rows: list[sqlite3.Row]) -> list[sqlite3.Row]:
+        key = self._sort_key
+        desc = self._sort_desc
+
+        def sort_value(r):
+            if key == "account":
+                acc = self.manager.get(r["account_id"])
+                return (acc.name if acc else r["account_id"]).lower()
+            if key == "from":
+                return (r["from_name"] or r["from_addr"] or "").lower()
+            if key == "subject":
+                return (r["subject"] or "").lower()
+            return r["received_at"] or ""   # date：ISO 字符串可直接比较
+
+        return sorted(rows, key=sort_value, reverse=desc)
+
     def _on_search_changed(self, *_):
         if self._search_job is not None:
             self.root.after_cancel(self._search_job)
@@ -314,6 +349,7 @@ class MainWindow:
             unread_only=(mode == "只看未读"),
             has_attach=(mode == "有附件"),
         )
+        rows = self._sort_rows(rows)
         for i, row in enumerate(rows):
             acc = self.manager.get(row["account_id"])
             acc_name = acc.name if acc else row["account_id"]

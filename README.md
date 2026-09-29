@@ -18,6 +18,7 @@
 | 🎨 Rich-text body (bold/italic/underline/color) with HTML + plain fallback | 富文本正文（加粗/斜体/下划线/颜色），HTML + 纯文本双版本 |
 | 📋 CC & BCC support | 支持抄送与密送 |
 | 🔍 Full-text search (incl. body) + Unread / Has-attachment filters | 全文搜索（含正文）+ 未读/有附件快捷筛选 |
+| ↕️ Click-to-sort columns | 列头点击排序 |
 | 📁 Per-account receive-folder selection (default INBOX) | 账户级收信文件夹选择（默认 INBOX） |
 | 📤 Sent-mail sync to the server's Sent folder (best-effort) | 发送后尽力同步到服务器"已发送"文件夹 |
 | 🖥️ Single instance: re-launching the exe brings the window to front | 单实例：再次启动自动唤醒主窗口置前 |
@@ -89,7 +90,7 @@ QQ 邮箱、网易 163/126 等国内邮箱需在网页设置中开启 IMAP **和
 
 每个账户一条守护线程：优先 IDLE 长连接推送（阻塞等待、空闲 CPU 为零），服务器不支持时自动降级轮询；断线指数退避重连；SMTP 发信跑在独立线程（标准库组装 MIME、中文附件名 RFC 2231 编码、尽力同步已发送文件夹）；单实例经 Win32 命名互斥体实现；GBK 等中文编码兜底解析。
 
-Details in the docs / 详细文档：[English](docs/technical-doc.md) · [中文技术文档](docs/技术文档.md) · [Dev Plan](docs/development-plan.md) · [中文开发计划](docs/开发计划.md) · [发邮件开发计划](docs/发邮件开发计划.md) · [搜索过滤与文件夹开发计划](docs/搜索过滤与文件夹开发计划.md) · [稳定性加固开发计划](docs/稳定性加固开发计划.md)
+Details in the docs / 详细文档：[English](docs/technical-doc.md) · [中文技术文档](docs/技术文档.md) · [Dev Plan](docs/development-plan.md) · [中文开发计划](docs/开发计划.md) · [发邮件开发计划](docs/发邮件开发计划.md) · [搜索过滤与文件夹开发计划](docs/搜索过滤与文件夹开发计划.md) · [稳定性加固开发计划](docs/稳定性加固开发计划.md) · [增量收信开发计划](docs/增量收信开发计划.md)
 
 ## 🗺️ Roadmap / 后续计划
 

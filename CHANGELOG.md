@@ -8,6 +8,24 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versio
 
 ---
 
+## [1.5.2] — 2026-09-29
+
+Sortable columns and a real-mailbox end-to-end verification tool. · 列头排序与真实邮箱端到端验证工具。
+
+### Added · 新增
+
+**English**
+
+- **Sortable columns**: click 来源 / 发件人 / 主题 / 时间 headers to sort (click again to reverse, ▲/▼ indicator); sorting is UI-side so it composes with search and filters
+- `tools/verify_163.py`: end-to-end verification against a real mailbox (temp DB, read-only effects) — connect, UIDVALIDITY read, folder listing with mUTF-7 decoding, incremental fetch watermark behavior. Verified live against NetEase 163: 6 folders decoded correctly (草稿箱/已发送/垃圾邮件…), first pass fetched 4 unseen mails, second pass downloaded 0 with unchanged watermark
+
+**中文**
+
+- **列头排序**：点击 来源 / 发件人 / 主题 / 时间 列头排序（再点反转，列头显示 ▲/▼）；UI 侧排序，与搜索、过滤器自由叠加
+- `tools/verify_163.py`：真实邮箱端到端验证工具（临时数据库，只读效果）——连接、UIDVALIDITY 读取、文件夹列表 mUTF-7 解码、增量抓取水位行为。已对网易 163 实测：6 个文件夹中文名解码正确（草稿箱/已发送/垃圾邮件…），第一轮抓取 4 封未读，第二轮 0 下载且水位不变
+
+---
+
 ## [1.5.1] — 2026-09-29
 
 Follow-up fixes from the second review pass over v1.4/v1.5. · 二轮复查对 v1.4/v1.5 新改动的修复。
