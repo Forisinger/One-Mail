@@ -203,5 +203,86 @@ class ChunkSizeTests(unittest.TestCase):
         self.assertGreaterEqual(CHUNK_SIZE, 1)
 
 
+class MarkSeenImaplibTests(unittest.TestCase):
+    """mark_seen 的 imaplib 交互 mock 测试（复查盲区补齐）。"""
+
+    def _mock_conn(self):
+        from unittest.mock import MagicMock
+        conn = MagicMock()
+        conn.login.return_value = ("OK", [b"Logged in"])
+        conn.select.return_value = ("OK", [b"3"])
+        conn.uid.return_value = ("OK", [None])
+        conn.logout.return_value = ("BYE", [b""])
+        return conn
+
+    def test_store_calls_and_seq_set(self):
+        """验证：非 readonly SELECT、.SILENT 标志、UID 数值排序 seq-set、logout。"""
+        import imaplib as real_imaplib
+        from unittest.mock import patch
+        from core import mail_client as mc
+
+        conn = self._mock_conn()
+        with patch.object(real_imaplib, "IMAP4_SSL", return_value=conn):
+            mc.MailClient.mark_seen(_account(), "pwd", "INBOX",
+                                    ["10", "2"], seen=True)
+        conn.select.assert_called_once()
+        args = conn.select.call_args
+        self.assertFalse(args.kwargs.get("readonly", True)
+                         if args.kwargs else args[1].get("readonly", True))
+        conn.uid.assert_called_once_with(
+            "store", "2,10", "(+FLAGS.SILENT (\\Seen))")
+        conn.logout.assert_called_once()
+
+    def test_store_unseen_uses_minus_silent(self):
+        import imaplib as real_imaplib
+        from unittest.mock import patch
+        from core import mail_client as mc
+
+        conn = self._mock_conn()
+        with patch.object(real_imaplib, "IMAP4_SSL", return_value=conn):
+            mc.MailClient.mark_seen(_account(), "pwd", "已发送",
+                                    ["5"], seen=False)
+        conn.uid.assert_called_once_with(
+            "store", "5", "(-FLAGS.SILENT (\\Seen))")
+
+    def test_select_no_raises(self):
+        """SELECT 返回 NO（文件夹不存在）必须抛错，而不是莫名状态机错误。"""
+        import imaplib as real_imaplib
+        from unittest.mock import patch
+        from core import mail_client as mc
+
+        conn = self._mock_conn()
+        conn.select.return_value = ("NO", [b"Mailbox doesn't exist"])
+        with patch.object(real_imaplib, "IMAP4_SSL", return_value=conn):
+            with self.assertRaises(real_imaplib.IMAP4.error):
+                mc.MailClient.mark_seen(_account(), "pwd", "不存在",
+                                        ["5"], seen=True)
+        conn.uid.assert_not_called()   # 不应继续 STORE
+
+    def test_store_failure_raises(self):
+        """STORE 返回 NO 抛 IMAP4.error（走 flag_sync 重试路径）。"""
+        import imaplib as real_imaplib
+        from unittest.mock import patch
+        from core import mail_client as mc
+
+        conn = self._mock_conn()
+        conn.uid.return_value = ("NO", [b"failed"])
+        with patch.object(real_imaplib, "IMAP4_SSL", return_value=conn):
+            with self.assertRaises(real_imaplib.IMAP4.error):
+                mc.MailClient.mark_seen(_account(), "pwd", "INBOX",
+                                        ["5"], seen=True)
+
+    def test_bad_uids_skipped_entirely(self):
+        """全部 UID 非法时不建连接直接返回。"""
+        from unittest.mock import patch
+        import imaplib as real_imaplib
+        from core import mail_client as mc
+
+        with patch.object(real_imaplib, "IMAP4_SSL") as factory:
+            mc.MailClient.mark_seen(_account(), "pwd", "INBOX",
+                                    ["bad"], seen=True)
+        factory.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

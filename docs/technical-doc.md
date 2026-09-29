@@ -242,5 +242,5 @@ Build: `pyinstaller build.spec --noconfirm` → `dist/OneMail.exe`.
 4. **Hardening regression tests** (test_robustness.py, offline): LIKE escaping, config atomicity + corrupt backup, unclosed script/style body recovery, migration idempotency, SMTP Date/Message-ID, domain-boundary matching, local delete
 5. **SMTP unit tests** (test_smtp.py, offline): MIME header encoding, multi-recipient parsing, ASCII/Chinese attachment filenames (RFC 2231), SMTP host derivation — all passing
 6. **Live test**: real NetEase 163 mailbox — connect, auto-poll fallback, fetch with source label, end-to-end OK
-7. **Flag-sync unit tests** (test_flag_sync.py, offline, v1.7.0): dedup, per-account/folder grouping, numeric UID sort, 50-UID chunking, retry-once-then-drop, kill switch, missing-account safety
+7. **Flag-sync unit tests** (test_flag_sync.py, offline, v1.7.0): dedup, per-account/folder grouping, numeric UID sort, 50-UID chunking, inline retry then drop, kill switch, missing-account safety, invalid-UID defense, plus imaplib-mock coverage of `mark_seen` (non-readonly SELECT, `.SILENT` seq-set, SELECT-NO/STORE-NO error paths, logout)
 8. **Packaged exe**: boots to tray, connects, fetches, no stderr output
