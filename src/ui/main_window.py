@@ -457,6 +457,8 @@ class MainWindow:
             menu.add_command(label=label, state="normal" if val.strip() else "disabled",
                              command=lambda v=val, l=label[2:]: self._copy_to_clipboard(v, l))
         menu.add_separator()
+        menu.add_command(label="标记为未读",
+                         command=self.mark_selected_unread)
         menu.add_command(label="删除（仅本地缓存）", command=self.delete_selected_mail)
         menu.tk_popup(event.x_root, event.y_root)
         menu.grab_release()          # 现代 tkinter 通常自动释放，兜底
@@ -613,6 +615,20 @@ class MainWindow:
             return
         db.mark_read(mail["id"])
         self._sync_read_flags([mail], seen=True)
+        self.refresh_mails()
+        self.refresh_accounts()
+        self.root.event_generate("<<UnreadChanged>>", when="tail")
+
+    def mark_selected_unread(self):
+        """标记为未读：本地置回未读，并经 flag_sync 向服务器 -FLAGS \\Seen（v1.8.0）。"""
+        sel = self.tree.selection()
+        if not sel:
+            return
+        mail = db.get_mail(int(sel[0]))
+        if mail is None:
+            return
+        db.mark_read(mail["id"], read=False)
+        self._sync_read_flags([mail], seen=False)
         self.refresh_mails()
         self.refresh_accounts()
         self.root.event_generate("<<UnreadChanged>>", when="tail")

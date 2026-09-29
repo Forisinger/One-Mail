@@ -21,6 +21,7 @@
 | ↕️ Click-to-sort columns | 列头点击排序 |
 | 📎 Save attachments from the reading pane (on-demand server fetch) | 阅读区保存附件（按需从服务器取原文） |
 | ✅ Read-state sync back to the server (batched \Seen writes, tray toggle) | 已读状态同步回服务器（成批 \Seen 写回，托盘可关） |
+| ↩️ Mark as unread (local + server flag cleared) | 标记为未读（本地与服务器标志同步清除） |
 | 📁 Per-account receive-folder selection (default INBOX) | 账户级收信文件夹选择（默认 INBOX） |
 | 📤 Sent-mail sync to the server's Sent folder (best-effort) | 发送后尽力同步到服务器"已发送"文件夹 |
 | 🖥️ Single instance: re-launching the exe brings the window to front | 单实例：再次启动自动唤醒主窗口置前 |
@@ -101,6 +102,7 @@ Details in the docs / 详细文档：[English](docs/technical-doc.md) · [中文
 - [x] Mail search & filter rules / 邮件搜索与过滤规则 ✅ v1.3.0
 - [x] Folder selection / 收信文件夹选择 ✅ v1.3.0
 - [x] Read-state sync to the server / 已读状态同步到服务器 ✅ v1.7.0
+- [x] Mark as unread / 标记为未读 ✅ v1.8.0
 - [ ] OAuth2 for Gmail/Outlook / Gmail 与 Outlook 的 OAuth2 登录
 
 ## 📄 License / 许可证
