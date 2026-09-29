@@ -127,12 +127,27 @@ class MailClient:
                                  timeout=_CONNECT_TIMEOUT)
         conn.login(acc.email, self.password)
         self._send_client_id(conn)      # 163/126：必须上报客户端 ID
-        conn.select(self._folder(), readonly=True)
+        conn.select(self._folder_wire(), readonly=True)
         return conn
 
     def _folder(self) -> str:
         """收信文件夹名（空值回退 INBOX）。"""
         return (getattr(self.account, "folder", "") or "INBOX").strip() or "INBOX"
+
+    def _folder_wire(self) -> str:
+        """IMAP 协议层的文件夹名：带引号 + 非 ASCII 名转回修改版 UTF-7。
+
+        imaplib 以 ascii 编码命令且不加引号：中文名会 UnicodeEncodeError，
+        含空格的名字会被拆成多个 atom 被服务器拒绝——都必须在此转换。
+        """
+        name = self._folder()
+        if re.search(r"&[0-9A-Za-z,+\-]+-", name):
+            return f'"{name}"'   # 用户直接填了服务器原始 mUTF-7 名：原样使用
+        try:
+            name.encode("ascii")
+            return f'"{name}"'
+        except UnicodeEncodeError:
+            return f'"{_encode_mutf7(name)}"'
 
     @staticmethod
     def _send_client_id(conn) -> None:
@@ -164,7 +179,7 @@ class MailClient:
 
     # ---------- IDLE 推送模式 ----------
     def _idle_loop(self, conn):
-        typ, _data = conn.select(self._folder(), readonly=True)
+        typ, _data = conn.select(self._folder_wire(), readonly=True)
         if typ != "OK":
             raise imaplib.IMAP4.error(f"SELECT {self._folder()} failed")
         # 启动即全量对账一次（补收离线期间的邮件）
@@ -197,9 +212,26 @@ class MailClient:
         """
         tag = conn._new_tag().decode()
         conn.send(f"{tag} IDLE\r\n".encode())
-        resp = conn.readline()
-        # 服务器接受 IDLE 的标志是发送继续行（+ ...），各家文案不同
-        if not resp.startswith(b"+"):
+        # 继续行（+ ...）之前可能先到 untagged 行（如恰好抵达的 EXISTS）；
+        # 有界等待而非无限阻塞，超时按不支持 IDLE 处理（转轮询）
+        resp = b""
+        cont_deadline = time.monotonic() + 10
+        while time.monotonic() < cont_deadline and not self._stop.is_set():
+            r, _, _ = select.select([conn.sock], [], [], _SELECT_SLICE)
+            if not r:
+                continue
+            resp = conn.readline()
+            if not resp:
+                raise imaplib.IMAP4.abort("IDLE 空响应")
+            if resp.startswith(b"+"):
+                break
+            upper = resp.upper()
+            if b"BYE" in upper:
+                raise imaplib.IMAP4.abort("服务器 BYE")
+            if resp.decode("ascii", "ignore").startswith(tag):
+                self.account.idle_supported = False   # 服务器 tagged 拒绝 IDLE
+                return False
+        else:
             self.account.idle_supported = False
             return False
 
@@ -256,7 +288,7 @@ class MailClient:
                 self._status("手动收信")
             if conn.state == "LOGOUT":
                 raise imaplib.IMAP4.abort("服务器已关闭连接")
-            conn.select(self._folder(), readonly=True)  # 轮询前刷新连接状态
+            conn.select(self._folder_wire(), readonly=True)  # 轮询前刷新连接状态
 
     # ---------- 收信 ----------
     def _fetch_new(self, conn):
@@ -301,7 +333,9 @@ class MailClient:
             typ, msgdata = conn.uid("fetch", uid, "(BODY.PEEK[])")
             if (typ != "OK" or not msgdata or not msgdata[0]
                     or not isinstance(msgdata[0], tuple)):
-                continue  # 个别服务器对失效 UID 返回纯文本 OK 行，跳过
+                # 本封抓取失败：终止本批，水位只推进到已成功的部分，
+                # 失败邮件下轮仍会被 UNSEEN 搜出并续抓
+                break
             raw = msgdata[0][1]
             parsed = parse_raw(raw)
             parsed_uid = uid.decode()
@@ -316,12 +350,16 @@ class MailClient:
                 "body_text": parsed.body_text,
                 "attachment_names": parsed.attachment_names,
             })
+        if not batch:
+            return
+        # 同步入库（DB 有全局锁，线程安全），确认落库后才推进水位——
+        # 若先推水位后入库，退出/崩溃窗口内的事件会因 UID ≤ 水位被永久跳过
+        new = database.insert_mails(self.account.id, batch, folder=folder)
         if fetched_max and uidvalidity:
-            # 只记录实际完成抓取的最大 UID：中断的批次下轮会续抓
             database.set_folder_state(self.account.id, folder,
                                       uidvalidity, fetched_max)
-        if batch:
-            self._on_new_mail(self.account, batch)
+        if new:
+            self._on_new_mail(self.account, new)   # 只通知真正新入库的
 
     def _status(self, text: str):
         try:
@@ -344,7 +382,7 @@ class MailClient:
                                  timeout=_CONNECT_TIMEOUT)
         try:
             conn.login(account.email, password)
-            _send_client_id(conn)
+            MailClient._send_client_id(conn)
             typ, data = conn.list('""', '*')
             if typ != "OK" or not data:
                 return ["INBOX"]
@@ -405,3 +443,28 @@ def _decode_mutf7(name: str) -> str:
         return "".join(out)
     except Exception:
         return name
+
+
+def _encode_mutf7(text: str) -> str:
+    """IMAP 修改版 UTF-7 编码（_decode_mutf7 的逆运算）。
+
+    ASCII 直通（& 转义为 &-）；非 ASCII 段整体 base64（UTF-16BE），
+    base64 的 "/" 按惯例写成 ","。
+    """
+    out: list[str] = []
+    buf: list[str] = []
+
+    def flush():
+        if buf:
+            b64 = base64.b64encode("".join(buf).encode("utf-16-be")).decode("ascii")
+            out.append("&" + b64.rstrip("=").replace("/", ",") + "-")
+            buf.clear()
+
+    for ch in text:
+        if 0x20 <= ord(ch) <= 0x7E:
+            flush()
+            out.append("&-" if ch == "&" else ch)
+        else:
+            buf.append(ch)
+    flush()
+    return "".join(out)

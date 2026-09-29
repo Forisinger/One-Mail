@@ -117,25 +117,27 @@ def save_to_sent(account: Account, password: str, msg: Message,
             typ, boxes = conn.list()
             if typ != "OK":
                 return False
-            folder = None
+            folder = None          # 服务器原始名（mUTF-7），APPEND 用
             for raw in boxes or []:
                 line = raw if isinstance(raw, bytes) else str(raw).encode("utf-8", "ignore")
                 m = re.match(rb'\(([^)]*)\)\s+"?([^"]*)"?\s+(.+)', line.strip())
                 if not m:
                     continue
-                name = m.group(3).strip()
+                _flags, delim, name = m.group(1), m.group(2), m.group(3)
+                name = name.strip()
                 if name.startswith(b'"') and name.endswith(b'"') and len(name) >= 2:
                     name = name[1:-1]
-                # 服务器返回的中文文件夹名是 IMAP 修改版 UTF-7（&XfJT0ZAB-），
-                # 必须解码后再与候选名比对；APPEND 也要用解码后的名字
                 decoded = _decode_mutf7(name.decode("ascii", "ignore"))
-                tail = decoded.rsplit("/", 1)[-1]
+                # 中文文件夹名必须解码后再比对；分隔符以服务器实际返回为准
+                sep = delim.decode("ascii", "ignore") or "/"
+                tail = decoded.rsplit(sep, 1)[-1] if sep != "/" else decoded.rsplit("/", 1)[-1]
                 if tail in SENT_FOLDER_CANDIDATES:
-                    folder = decoded
+                    folder = name.decode("ascii", "ignore")
                     break
             if not folder:
                 return False
-            typ, _ = conn.append(folder, r"(\Seen)", None, msg.as_bytes())
+            # APPEND 必须用服务器原始名（imaplib 命令按 ascii 编码，中文名会炸）
+            typ, _ = conn.append(f'"{folder}"', r"(\Seen)", None, msg.as_bytes())
             return typ == "OK"
         finally:
             try:

@@ -20,6 +20,9 @@ def _badge_font():
     return ImageFont.load_default()
 
 
+_FONT_CACHE = None   # 模块级缓存，避免每次重绘都扫字体文件
+
+
 def base_icon() -> Image.Image:
     """蓝色圆角方块 + 白色信封。"""
     img = Image.new("RGBA", (_SIZE, _SIZE), (0, 0, 0, 0))
@@ -46,12 +49,11 @@ def with_badge(count: int) -> Image.Image:
     cx, cy = _SIZE - r - 2, r + 2
     d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(230, 50, 50, 255),
               outline=(255, 255, 255, 255), width=2)
-    # 文字居中（缓存字体避免每次重绘都扫字体文件）
+    # 文字居中（使用缓存的字体实例）
     global _FONT_CACHE
-    try:
-        font = _FONT_CACHE
-    except NameError:
-        font = _FONT_CACHE = _badge_font()
+    if _FONT_CACHE is None:
+        _FONT_CACHE = _badge_font()
+    font = _FONT_CACHE
     bbox = d.textbbox((0, 0), label, font=font)
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
     d.text((cx - tw / 2 - bbox[0], cy - th / 2 - bbox[1]), label,

@@ -33,6 +33,13 @@ CREATE TABLE IF NOT EXISTS mails (
 );
 CREATE INDEX IF NOT EXISTS idx_mails_account ON mails(account_id, received_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mails_unread ON mails(is_read);
+CREATE TABLE IF NOT EXISTS folder_state (
+    account_id TEXT NOT NULL,
+    folder TEXT NOT NULL,
+    uidvalidity INTEGER DEFAULT 0,
+    max_uid INTEGER DEFAULT 0,
+    PRIMARY KEY(account_id, folder)
+);
 """
 
 
@@ -119,22 +126,12 @@ def init() -> None:
             conn.execute("ALTER TABLE mails ADD COLUMN attachment_names TEXT")
 
 
-# 增量收信状态：每账户每文件夹记录 UIDVALIDITY 与已抓取的最大 UID
-_STATE_SCHEMA = """
-CREATE TABLE IF NOT EXISTS folder_state (
-    account_id TEXT NOT NULL,
-    folder TEXT NOT NULL,
-    uidvalidity INTEGER DEFAULT 0,
-    max_uid INTEGER DEFAULT 0,
-    PRIMARY KEY(account_id, folder)
-);
-"""
+# 增量收信状态表建表语句已并入 _SCHEMA（见 init）
 
 
 def get_folder_state(account_id: str, folder: str) -> tuple[int, int]:
     """返回 (uidvalidity, max_uid)，无记录为 (0, 0)。"""
     with _LOCK, _conn() as conn:
-        conn.executescript(_STATE_SCHEMA)
         row = conn.execute(
             "SELECT uidvalidity, max_uid FROM folder_state"
             " WHERE account_id=? AND folder=?", (account_id, folder)).fetchone()
@@ -144,7 +141,6 @@ def get_folder_state(account_id: str, folder: str) -> tuple[int, int]:
 def set_folder_state(account_id: str, folder: str,
                      uidvalidity: int, max_uid: int) -> None:
     with _LOCK, _conn() as conn:
-        conn.executescript(_STATE_SCHEMA)
         conn.execute(
             """INSERT INTO folder_state (account_id, folder, uidvalidity, max_uid)
                VALUES (?,?,?,?)
@@ -269,5 +265,4 @@ def unread_count(account_id: str | None = None) -> int:
 def delete_account_mails(account_id: str) -> None:
     with _LOCK, _conn() as conn:
         conn.execute("DELETE FROM mails WHERE account_id=?", (account_id,))
-        conn.executescript(_STATE_SCHEMA)
         conn.execute("DELETE FROM folder_state WHERE account_id=?", (account_id,))

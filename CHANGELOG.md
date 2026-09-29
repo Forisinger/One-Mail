@@ -8,6 +8,54 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versio
 
 ---
 
+## [1.5.1] — 2026-09-29
+
+Follow-up fixes from the second review pass over v1.4/v1.5. · 二轮复查对 v1.4/v1.5 新改动的修复。
+
+### Fixed · 修复
+
+**English**
+
+- **(P0) New-mail loss window closed**: the incremental watermark was advanced before the mails were actually inserted (insertion used to happen on the UI thread up to 500 ms later, and quit() exits via `os._exit`) — a mail fetched in that window would be permanently skipped by `uid <= watermark` on the next run. Fetching now inserts synchronously on the worker thread, advances the watermark only after a confirmed insert, and notifies with genuinely-new mails only; quit() also drains the event queue before exiting
+- **(P1) 获取 (Fetch folder list) button always failed** with a `NameError` (`_send_client_id` is a class staticmethod and was called bare)
+- **(P1) Non-default folders could never receive mail**: imaplib sends commands ascii-encoded and unquoted — Chinese folder names raised `UnicodeEncodeError` and "Sent Messages"-style names were split into multiple atoms, both causing endless reconnects. Folder names are now converted back to modified-UTF-7 and quoted on the wire (`_folder_wire()`); names already in wire form are used as-is
+- **(P1) A single failed FETCH no longer skips that mail forever**: the watermark now only advances past successfully fetched UIDs — a failed fetch ends the batch and the mail is retried next cycle
+- IDLE continuation-line wait is bounded (10 s) and tolerates untagged lines preceding the `+` (previously misjudged as "no IDLE support" and left the protocol out of sync)
+- save_to_sent APPENDs with the server's raw mUTF-7 folder name (decoded names crashed on Chinese providers) and takes the hierarchy delimiter from the LIST response instead of hardcoding `/`
+- Parser recovery is depth-limited (8) against pathological nested-markup inputs; `folder_state` DDL moved into `init()`; badge font cached at module level
+
+**中文**
+
+- **（P0）封堵丢信窗口**：增量水位此前在真正入库之前推进（入库原本在 UI 线程、最多延迟 500ms，而退出走 `os._exit`）——窗口期内抓到的邮件下轮会因 `uid ≤ 水位` 被永久跳过。现在收信线程同步入库、确认落库后才推水位、只通知真正新入库的邮件；退出前还会排空事件队列
+- **（P1）「获取文件夹列表」按钮必然报 NameError**（`_send_client_id` 是类静态方法却被裸调用）
+- **（P1）非默认文件夹此前无法收信**：imaplib 命令按 ascii 编码且不加引号——中文文件夹名直接 UnicodeEncodeError，"Sent Messages" 类名字被拆成多个 atom 被服务器拒绝，均表现为无限重连。现在发送前把名字转回修改版 UTF-7 并加引号（`_folder_wire()`）；已是线格式（原始 mUTF-7）的名字原样使用
+- **（P1）单封 FETCH 失败不再导致该邮件永久跳过**：水位只推进到本批实际成功抓取的 UID，失败即断批、下轮续抓
+- IDLE 继续行等待改为 10 秒有界，并容忍 `+` 之前的 untagged 行（此前会被误判为不支持 IDLE 且留下协议失步）
+- save_to_sent 改用服务器原始 mUTF-7 文件夹名 APPEND（解码后的中文名必然失败），层级分隔符取自 LIST 响应而非硬编码 `/`
+- 解析器恢复深度限 8 层防病态输入；`folder_state` 建表挪入 `init()`；角标字体模块级缓存
+
+---
+
+Incremental fetching (no more re-downloading all unseen mail) and attachment names in the reading pane. · 增量收信（不再反复整封下载未读邮件）与阅读区附件名展示。
+
+### Added · 新增
+
+**English**
+
+- **Incremental fetch**: a new `folder_state` table records `UIDVALIDITY` + the highest fetched UID per account/folder; the (cheap, server-side) UNSEEN search is unchanged, but only UIDs above the watermark are actually downloaded. A mailbox with hundreds of old unread mail no longer re-downloads everything on every push/poll cycle; interrupted batches resume from the last fully fetched UID
+- **UIDVALIDITY handling**: if the server resets UIDs, the folder's local cache is cleared and resynced, preventing new mail from being deduplicated against recycled UIDs
+- **Attachment names in the reading pane**: the `mails` table gains an `attachment_names` column (auto-ALTER for old DBs) and the reading pane shows `📎 附件：a.pdf、b.zip`
+- Tray badge digits now render with a TrueType font (larger/clearer at 64 px, graceful fallback); the tray degrades gracefully on systems without a shell; all accounts missing auth codes are prompted one after another at startup
+
+**中文**
+
+- **增量收信**：新增 `folder_state` 表，按账户/文件夹记录 `UIDVALIDITY` + 已抓取最大 UID；UNSEEN 搜索照旧（服务端执行、开销极小），但只有超过水位的 UID 才真正下载原文。几百封旧未读的邮箱不再在每次推送/轮询时全部重新下载；中断的批次从最后完整抓取的 UID 续传
+- **UIDVALIDITY 处理**：服务器重置 UID 时清空该文件夹本地缓存重新对账，防止 UID 复用导致新旧邮件错配去重
+- **阅读区附件名**：`mails` 表新增 `attachment_names` 列（旧库自动 ALTER），阅读区显示「📎 附件：a.pdf、b.zip」
+- 托盘角标数字改用 TrueType 字体（64px 下更大更清晰，失败回退）；无 Shell/托盘环境优雅降级；启动时逐个提示全部缺授权码的账户
+
+---
+
 ## [1.5.0] — 2026-09-29
 
 Incremental fetching (no more re-downloading all unseen mail) and attachment names in the reading pane. · 增量收信（不再反复整封下载未读邮件）与阅读区附件名展示。

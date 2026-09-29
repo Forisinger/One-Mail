@@ -200,6 +200,7 @@ CREATE INDEX idx_mails_account ON mails(account_id, received_at DESC);
 - **Resumable**: max_uid counts only fully fetched UIDs (interrupted batches resume); a UIDVALIDITY change clears that folder's cache and resyncs, guarding against UID reuse
 - **Attachment names**: `mails.attachment_names TEXT` column (auto-ALTER via PRAGMA check), stored as JSON, shown in the reading pane
 - **Misc**: tray degrades gracefully without a shell; badge digits use a TrueType font with fallback; all accounts missing auth codes are prompted chain-wise at startup
+- **v1.5.1 corrections**: watermark advances only after confirmed synchronous insert (worker-thread insert, new-only notifications, event-queue drained on quit) — closing the loss window where a fetched mail could be permanently skipped; a failed FETCH ends the batch (resume next cycle); folder names go through `_folder_wire()` (mUTF-7 + quoting) since imaplib sends ascii-encoded unquoted commands; `list_folders` NameError fixed; IDLE continuation wait bounded with untagged-line tolerance; save_to_sent APPENDs the raw mUTF-7 name
 
 ### 14. Footprint guarantees
 - No Electron/Qt/browser engine — tkinter is the whole UI

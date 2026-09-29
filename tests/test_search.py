@@ -155,6 +155,32 @@ class SearchFolderTests(unittest.TestCase):
         self.assertEqual(_decode_mutf7("&V4NXPpCuTvY-"), "垃圾邮件")
         self.assertEqual(_decode_mutf7("Sent&-1"), "Sent&1")  # "&-" 表示字面 &
 
+    def test_mutf7_roundtrip(self):
+        from core.mail_client import _decode_mutf7, _encode_mutf7
+        for name in ("已发送", "草稿箱", "垃圾邮件", "Sent", "我的&笔记",
+                     "INBOX/子文件夹", "工作 邮件"):
+            self.assertEqual(_decode_mutf7(_encode_mutf7(name)), name)
+        # 已发送 的编码就是服务器返回的原始形式
+        self.assertEqual(_encode_mutf7("已发送"), "&XfJT0ZAB-")
+
+    def test_folder_wire(self):
+        from core.mail_client import MailClient
+        acc = Account(id="x", name="n", email="a@163.com",
+                      imap_host="imap.163.com")
+        acc.folder = "INBOX"
+        self.assertEqual(MailClient(acc, "", None, None)._folder_wire(),
+                         '"INBOX"')
+        acc.folder = "已发送"
+        self.assertEqual(MailClient(acc, "", None, None)._folder_wire(),
+                         '"&XfJT0ZAB-"')
+        acc.folder = "Sent Messages"
+        self.assertEqual(MailClient(acc, "", None, None)._folder_wire(),
+                         '"Sent Messages"')
+        # 用户直接填服务器原始名：原样使用不二次编码
+        acc.folder = "&XfJT0ZAB-"
+        self.assertEqual(MailClient(acc, "", None, None)._folder_wire(),
+                         '"&XfJT0ZAB-"')
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -46,8 +46,11 @@ class _HTML2Text(HTMLParser):
     _RESUME_RE = re.compile(
         r"<\s*/?\s*(body|div|p|br|table|tr|td|th|h[1-6]|font|span|a)\b", re.I)
 
-    def __init__(self):
+    _MAX_SKIP_DEPTH = 8           # 恢复解析的嵌套深度上限，防递归爆栈
+
+    def __init__(self, depth: int = 0):
         super().__init__(convert_charrefs=True)
+        self._depth = depth
         self._chunks: list[str] = []
         self._skip_stack: list[str] = []
         self._skip_bytes = 0
@@ -80,9 +83,11 @@ class _HTML2Text(HTMLParser):
         m = self._RESUME_RE.search(data)
         if not m:
             return
+        if self._depth >= self._MAX_SKIP_DEPTH:
+            return   # 深度超限：丢弃该段，不再递归恢复
         # 未闭合的 script/style：从第一处真实标记恢复，用子解析器处理剩余部分
         self._skip_stack.clear()
-        sub = _HTML2Text()
+        sub = _HTML2Text(depth=self._depth + 1)
         sub.feed(data[m.start():])
         text = sub.text()
         if text:
@@ -97,12 +102,13 @@ class _HTML2Text(HTMLParser):
             self._skip_stack.clear()
             m = self._RESUME_RE.search(raw)
             if m:
-                sub = _HTML2Text()
-                sub.feed(raw[m.start():])
-                sub.close()
-                text = sub.text()
-                if text:
-                    self._chunks.append(text)
+                if self._depth < self._MAX_SKIP_DEPTH:
+                    sub = _HTML2Text(depth=self._depth + 1)
+                    sub.feed(raw[m.start():])
+                    sub.close()
+                    text = sub.text()
+                    if text:
+                        self._chunks.append(text)
         raw = "".join(self._chunks)
         return re.sub(r"\n{3,}", "\n\n", raw).strip()
 

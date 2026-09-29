@@ -123,18 +123,18 @@ class App:
             pass
 
     def _handle_new_mail(self, account, mails):
-        new = database.insert_mails(account.id, mails,
-                                    folder=getattr(account, "folder", "INBOX"))
+        # 邮件已在收信线程同步入库（水位推进依赖入库完成），
+        # 这里只负责刷新 UI 与通知；mails 只含真正新入库的邮件
         self.window.full_refresh()
         self.update_badge()
-        if new:
-            first = new[0]
+        if mails:
+            first = mails[0]
             title = f"一邮通 · {account.name}"
             msg = f"{first['from_name'] or first['from_addr']}\n{first['subject']}"
-            if len(new) > 1:
-                msg += f"（等 {len(new)} 封新邮件）"
+            if len(mails) > 1:
+                msg += f"（等 {len(mails)} 封新邮件）"
             notify_send(self.tray.icon, title, msg)
-            self.window.set_status(f"[{account.name}] 收到 {len(new)} 封新邮件")
+            self.window.set_status(f"[{account.name}] 收到 {len(mails)} 封新邮件")
 
     def _handle_command(self, cmd: str):
         if cmd == CMD_SHOW:
@@ -159,6 +159,11 @@ class App:
             self.quit()
 
     def quit(self):
+        try:
+            # 兜底：退出前把已排队的事件处理完（确保新邮件已入库/界面已刷新）
+            self._drain_events()
+        except Exception:
+            pass
         try:
             self.scheduler.stop_all()
             self.tray.stop()
