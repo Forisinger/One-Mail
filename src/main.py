@@ -112,7 +112,8 @@ class App:
             pass
 
     def _handle_new_mail(self, account, mails):
-        new = database.insert_mails(account.id, mails)
+        new = database.insert_mails(account.id, mails,
+                                    folder=getattr(account, "folder", "INBOX"))
         self.window.full_refresh()
         self.update_badge()
         if new:

@@ -96,6 +96,7 @@ OneMail/
       "imap_port": 993,
       "ssl": true,
       "enabled": true,
+      "folder": "INBOX",
       "idle_supported": false,
       "poll_interval": 300,
       "smtp_host": "",
@@ -119,13 +120,14 @@ CREATE TABLE mails (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id TEXT NOT NULL,       -- source labeling key
     uid TEXT NOT NULL,
+    folder TEXT DEFAULT 'INBOX',    -- receive folder (v1.3.0)
     message_id TEXT,
     from_addr TEXT, from_name TEXT,
     subject TEXT, body_text TEXT,
     has_attachment INTEGER DEFAULT 0,
     received_at TEXT, fetched_at TEXT,
     is_read INTEGER DEFAULT 0,
-    UNIQUE(account_id, uid)
+    UNIQUE(account_id, folder, uid)
 );
 CREATE INDEX idx_mails_account ON mails(account_id, received_at DESC);
 ```
@@ -178,7 +180,14 @@ CREATE INDEX idx_mails_account ON mails(account_id, received_at DESC);
 - **Account panel right-click**: copy the account's e-mail address / display name (not offered on the "All Mail" card)
 - **Reading pane right-click**: copy selection / select-all — subject, metadata and body fragments are all selectable (native Text widget behavior + menu affordance)
 
-### 10. Footprint guarantees
+### 10. Search, filters & receive folder (v1.3.0)
+- **SQL-level search**: `search_mails()` LIKE-matches subject / sender name / sender address / body in one query (no more front-end truncation at 200 rows); composes freely with the account filter and the All/Unread/Has-attachment filter; returns (rows, total) for the status bar
+- **Receive folder**: accounts carry a `folder` field (default INBOX); all three `SELECT`/fetch sites in `mail_client.py` honor it (both IDLE and polling paths); the DB unique key moves to `(account_id, folder, uid)` because UID spaces are per-folder
+- **Old-DB migration**: `init()` rebuilds the mails table in one transaction when the `folder` column is missing — data copied with folder='INBOX', no loss for existing users
+- **Folder listing**: the account dialog's 获取 (Fetch) button runs `LIST "" "*"` on a worker thread, parses `(flags) delim name` lines, skips `\Noselect`, and decodes **IMAP modified UTF-7** (`&XfJT0ZAB-` → 已发送) so Chinese folder names display correctly
+- **Connection-management fix**: `database.py` now uses a contextmanager that commits **and closes** each connection (the old `with sqlite3.connect()` only managed the transaction — the db file handle stayed open forever on Windows)
+
+### 11. Footprint guarantees
 - No Electron/Qt/browser engine — tkinter is the whole UI
 - IDLE blocks on the socket = 0% idle CPU; polling accounts wake briefly per interval
 - Body text truncated to 64 KB on ingest to bound DB growth
@@ -201,5 +210,7 @@ Build: `pyinstaller build.spec --noconfirm` → `dist/OneMail.exe`.
 
 1. **Parser unit tests**: GBK headers, nested MIME, HTML stripping, attachment detection, garbage-input robustness — all passing
 2. **Smoke tests**: DB insert/dedup/unread counts, DPAPI round-trip (incl. non-ASCII auth codes), badge rendering 0/99+/100
-3. **Live test**: real NetEase 163 mailbox — connect, auto-poll fallback, fetch with source label, end-to-end OK
-4. **Packaged exe**: boots to tray, connects, fetches, no stderr output
+3. **Search/migration unit tests** (test_search.py, offline): old-schema migration, folder isolation & dedup, body/subject/sender keyword hits, unread+attachment+account filter composition, mUTF-7 decoding
+4. **SMTP unit tests** (test_smtp.py, offline): MIME header encoding, multi-recipient parsing, ASCII/Chinese attachment filenames (RFC 2231), SMTP host derivation — all passing
+5. **Live test**: real NetEase 163 mailbox — connect, auto-poll fallback, fetch with source label, end-to-end OK
+6. **Packaged exe**: boots to tray, connects, fetches, no stderr output

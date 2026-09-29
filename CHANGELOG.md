@@ -8,6 +8,46 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versio
 
 ---
 
+## [1.3.0] — 2026-09-29
+
+Full-text search with filters, and per-account receive-folder selection. · 全文搜索与过滤，账户级收信文件夹选择。
+
+### Added · 新增
+
+**English**
+
+- **Full-text search**: the search box now also matches the mail **body**, pushed down into SQLite (LIKE) so results are no longer capped by the 200-row front-end list; subject / sender name / sender address / body all searchable
+- **Quick filters**: an All / **Unread** / **Has attachment** dropdown next to the search box, composable with the account filter and keyword
+- The status bar shows `N total, M shown` while a filter or keyword is active
+- **Receive folder selection**: each account can fetch from any IMAP folder (default INBOX — Spam, archive folders, etc.)
+- The account dialog has a **收信文件夹 (receive folder)** row with a **Fetch** button that lists the server's folders live (worker thread, `LIST "" "*"`, `\Noselect` skipped, **IMAP modified-UTF-7 decoded** so Chinese folder names like 已发送 render properly)
+
+**中文**
+
+- **全文搜索**：搜索框现在同时匹配邮件**正文**，并下沉到 SQLite（LIKE）执行，不再受前端 200 条列表截断；主题 / 发件人姓名 / 发件人地址 / 正文均可命中
+- **快捷过滤**：搜索框旁新增 全部 / **只看未读** / **有附件** 下拉筛选，可与账户筛选、关键字任意叠加
+- 筛选或搜索生效时状态栏显示「共 N 封，显示 M 封」
+- **收信文件夹选择**：每个账户可指定任意 IMAP 文件夹收信（默认 INBOX——垃圾箱、归档文件夹等均可）
+- 账户对话框新增**收信文件夹**行与**获取**按钮：子线程实时 `LIST "" "*"` 列出服务器全部文件夹（跳过 `\Noselect`，内置 **IMAP 修改版 UTF-7 解码**，「已发送」等中文名正常显示）
+
+### Changed · 变更
+
+**English**
+
+- `mails` table gains a `folder` column; unique key moves from `(account_id, uid)` to `(account_id, folder, uid)` — UID spaces are per-folder. Old databases migrate in-place in one transaction (existing rows become INBOX), zero data loss
+- `mail_client.py`: every `SELECT`/fetch site (connect / IDLE loop / polling loop) now uses the account's configured folder
+- `database.py` connections are now committed **and closed** via a contextmanager — previously the raw `with sqlite3.connect()` never closed connections, leaving the db file handle permanently locked on Windows
+- Unit suite grows to 29 cases (new `tests/test_search.py`: migration, folder isolation/dedup, search composition, mUTF-7)
+
+**中文**
+
+- `mails` 表新增 `folder` 列；唯一键由 `(account_id, uid)` 升级为 `(account_id, folder, uid)`（UID 按文件夹独立）。旧库在单事务中原地迁移（存量邮件记为 INBOX），零数据丢失
+- `mail_client.py`：连接 / IDLE 循环 / 轮询循环三处 SELECT/抓取全部改用账户配置的文件夹
+- `database.py` 连接改为 contextmanager——提交事务并**真正关闭连接**（原先 `with sqlite3.connect()` 从不关闭，Windows 上 db 文件句柄一直被占用）
+- 单测增至 29 例（新增 `tests/test_search.py`：迁移、文件夹隔离/去重、搜索组合、mUTF-7 解码）
+
+---
+
 ## [1.2.0] — 2026-09-29
 
 CC/BCC recipients and rich-text (HTML) composing. · 抄送/密送与 HTML 富文本写信。

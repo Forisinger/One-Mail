@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import base64
 import imaplib
 import re
 import socket
@@ -100,8 +101,12 @@ class MailClient:
             conn = imaplib.IMAP4(acc.imap_host, acc.imap_port)
         conn.login(acc.email, self.password)
         self._send_client_id(conn)      # 163/126：必须上报客户端 ID
-        conn.select("INBOX", readonly=True)
+        conn.select(self._folder(), readonly=True)
         return conn
+
+    def _folder(self) -> str:
+        """收信文件夹名（空值回退 INBOX）。"""
+        return (getattr(self.account, "folder", "") or "INBOX").strip() or "INBOX"
 
     @staticmethod
     def _send_client_id(conn) -> None:
@@ -133,9 +138,9 @@ class MailClient:
 
     # ---------- IDLE 推送模式 ----------
     def _idle_loop(self, conn):
-        typ, data = conn.select("INBOX", readonly=True)
+        typ, data = conn.select(self._folder(), readonly=True)
         if typ != "OK":
-            raise imaplib.IMAP4.error("SELECT INBOX failed")
+            raise imaplib.IMAP4.error(f"SELECT {self._folder()} failed")
         self._last_seen_exists = int(data[0] or b"0")
         # 启动即全量对账一次（补收离线期间的邮件）
         self._fetch_new(conn)
@@ -211,7 +216,7 @@ class MailClient:
                 break
             if conn.state == "LOGOUT":
                 raise imaplib.IMAP4.abort("服务器已关闭连接")
-            conn.select("INBOX", readonly=True)  # 轮询前刷新连接状态
+            conn.select(self._folder(), readonly=True)  # 轮询前刷新连接状态
 
     # ---------- 收信 ----------
     def _fetch_new(self, conn):
@@ -250,3 +255,78 @@ class MailClient:
             self._on_status(self.account, text)
         except Exception:
             pass
+
+    # ---------- 文件夹列表（供账户对话框调用） ----------
+    @staticmethod
+    def list_folders(account, password: str) -> list[str]:
+        """临时连接服务器，LIST 出全部可选文件夹名（跳过 \\Noselect）。
+
+        供「获取文件夹列表」按钮使用；任何失败都以异常抛出，由调用方提示。
+        """
+        if account.ssl:
+            conn = imaplib.IMAP4_SSL(account.imap_host, account.imap_port)
+        else:
+            conn = imaplib.IMAP4(account.imap_host, account.imap_port)
+        try:
+            conn.login(account.email, password)
+            _send_client_id(conn)
+            typ, data = conn.list('""', '*')
+            if typ != "OK" or not data:
+                return ["INBOX"]
+            folders: list[str] = []
+            for item in data:
+                if not item:
+                    continue
+                line = item if isinstance(item, bytes) else item.encode("utf-8", "ignore")
+                # 行格式：(flags) "delimiter" "name"
+                m = re.match(rb'\(([^)]*)\)\s+"?([^"]*)"?\s+(.+)', line.strip())
+                if not m:
+                    continue
+                flags, _delim, raw_name = m.group(1), m.group(2), m.group(3)
+                if b"Noselect" in flags:
+                    continue
+                name = raw_name.strip()
+                # 服务器返回的名字常带引号
+                if name.startswith(b'"') and name.endswith(b'"') and len(name) >= 2:
+                    name = name[1:-1]
+                # 支持修改的 UTF-7（IMAP mUTF-7）：& 开头段先转 + 再 base64 解
+                text = _decode_mutf7(name.decode("ascii", "ignore"))
+                if text:
+                    folders.append(text)
+            if "INBOX" not in folders:
+                folders.insert(0, "INBOX")
+            return folders
+        finally:
+            try:
+                conn.logout()
+            except Exception:
+                pass
+
+
+def _decode_mutf7(name: str) -> str:
+    """IMAP 修改版 UTF-7 解码（RFC 3501 5.1.3）。纯 ASCII 原样返回；解码失败返回原文。"""
+    if "&" not in name:
+        return name
+    try:
+        out, i = [], 0
+        while i < len(name):
+            ch = name[i]
+            if ch != "&":
+                out.append(ch)
+                i += 1
+                continue
+            j = name.find("-", i)
+            if j < 0:
+                out.append(name[i:])
+                break
+            b64 = name[i + 1:j]
+            if not b64:
+                out.append("&")
+            else:
+                b64 = b64.replace(",", "/")
+                pad = "=" * (-len(b64) % 4)
+                out.append(base64.b64decode(b64 + pad).decode("utf-16-be"))
+            i = j + 1
+        return "".join(out)
+    except Exception:
+        return name

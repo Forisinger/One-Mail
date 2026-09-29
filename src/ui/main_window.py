@@ -72,6 +72,7 @@ class MainWindow:
         self.scheduler = scheduler
         self._filter_account: str | None = None   # None = 全部账户
         self._search_var = tk.StringVar()
+        self._filter_var = tk.StringVar(value="全部")
         self._account_rows: list[tuple[tk.Frame, str | None]] = []
         self._collapsed = bool(
             config_store.load().get("settings", {}).get("accounts_collapsed", False)
@@ -109,6 +110,14 @@ class MainWindow:
         ):
             ttk.Button(bar, text=text, command=cmd,
                        style="Tool.TButton").pack(side="left", padx=(0, 6))
+
+        # 过滤器（搜索框左侧）：全部 / 只看未读 / 有附件
+        self._filter_box = ttk.Combobox(
+            bar, textvariable=self._filter_var, width=10, state="readonly",
+            values=("全部", "只看未读", "有附件"),
+        )
+        self._filter_box.pack(side="right", padx=(6, 0))
+        self._filter_box.bind("<<ComboboxSelected>>", lambda e: self.refresh_mails())
 
         # 搜索框（右侧）
         search_wrap = tk.Frame(bar, bg=CARD, highlightbackground="#d4dcea",
@@ -283,16 +292,19 @@ class MainWindow:
         self.refresh_mails()
 
     def refresh_mails(self):
-        keyword = self._search_var.get().strip().lower()
+        """按账户 + 过滤器 + 关键字组合查询（搜索下沉 SQL，正文也会被检索）。"""
+        keyword = self._search_var.get().strip()
+        mode = self._filter_var.get()
         self.tree.delete(*self.tree.get_children())
-        rows = db.list_mails(self._filter_account)
+        rows, total = db.search_mails(
+            self._filter_account, keyword,
+            unread_only=(mode == "只看未读"),
+            has_attach=(mode == "有附件"),
+        )
         for i, row in enumerate(rows):
             acc = self.manager.get(row["account_id"])
             acc_name = acc.name if acc else row["account_id"]
             subj = ("📎 " if row["has_attachment"] else "") + (row["subject"] or "")
-            if keyword and keyword not in (subj + (row["from_name"] or "")
-                                           + (row["from_addr"] or "")).lower():
-                continue
             tags = []
             if not row["is_read"]:
                 tags.append("unread")
@@ -302,6 +314,10 @@ class MainWindow:
                              values=(acc_name, row["from_name"] or row["from_addr"],
                                      subj, (row["received_at"] or "")[:16]),
                              tags=tuple(tags))
+        filtered = len(rows)
+        self.var_status.set(
+            f"共 {total} 封，显示 {filtered} 封"
+            if (keyword or mode != "全部") else f"共 {total} 封")
 
     def full_refresh(self):
         self.refresh_accounts()

@@ -33,6 +33,7 @@ class Account:
     imap_port: int = 993
     ssl: bool = True
     enabled: bool = True
+    folder: str = "INBOX"                # 收信文件夹（IDLE/轮询均以此为准）
     idle_supported: bool | None = None   # None=未知，连接后探测
     poll_interval: int = 300             # IDLE 不可用时的轮询间隔
     smtp_host: str = ""                  # 留空则由 imap_host 推导
