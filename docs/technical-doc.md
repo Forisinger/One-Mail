@@ -105,7 +105,7 @@ OneMail/
     "autostart": true,
     "poll_interval_fallback": 300,
     "notify_sound": true,
-    "start_minimized": true,
+    "start_minimized": false,
     "accounts_collapsed": false
   }
 }
@@ -169,7 +169,13 @@ CREATE INDEX idx_mails_account ON mails(account_id, received_at DESC);
 - Key: `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value `OneMail.exe --minimized`
 - Toggled from settings; writes/deletes the registry value
 
-### 9. Footprint guarantees
+### 9. Right-click copy (v1.1.1)
+- Single helper `_copy_to_clipboard()`: `clipboard_clear/append` + status-bar feedback; empty values never reach the clipboard
+- **Mail list right-click**: copy subject / sender name / sender address / full body (menu only on a row hit)
+- **Account panel right-click**: copy the account's e-mail address / display name (not offered on the "All Mail" card)
+- **Reading pane right-click**: copy selection / select-all — subject, metadata and body fragments are all selectable (native Text widget behavior + menu affordance)
+
+### 10. Footprint guarantees
 - No Electron/Qt/browser engine — tkinter is the whole UI
 - IDLE blocks on the socket = 0% idle CPU; polling accounts wake briefly per interval
 - Body text truncated to 64 KB on ingest to bound DB growth

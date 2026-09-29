@@ -53,9 +53,12 @@ pyinstaller build.spec --noconfirm
 
 ## 📖 First Run / 首次使用
 
-1. OneMail starts in the tray (red badge shows unread count / 红色角标显示未读数).
+1. Double-clicking the exe opens the **main window** directly; when launched by auto-start it goes silently to the tray (red badge shows unread count / 红色角标显示未读数). Re-launching the exe while running wakes the window to front.
 2. Click **添加账户 / Add Account**, enter your address and **authorization code**.
 3. Done — new mail shows up in the list, labeled by source, with balloon notifications.
+4. Copy anything with a right-click: subject / sender / e-mail address from the mail list, your own account address from the account panel, or any selected text in the reading pane.
+
+右键即可复制：邮件列表可复制主题/发件人/邮箱地址，账户面板可复制自己的邮箱地址，阅读区任意选中文本均可复制。
 
 **Provider note / 邮箱服务商须知**: QQ Mail / NetEase 163/126 and most Chinese providers require an **authorization code (授权码)** instead of your login password — enable IMAP **and SMTP** in the web settings, generate the code, and paste it into OneMail. The same code is used for both receiving and sending. NetEase additionally requires the IMAP `ID` handshake, which OneMail sends automatically.
 

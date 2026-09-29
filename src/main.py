@@ -161,9 +161,8 @@ def main():
     if not acquire():
         notify_running_instance()
         return
-    start_minimized = "--minimized" in sys.argv or bool(
-        config_store.load().get("settings", {}).get("start_minimized", True)
-    )
+    # 双击 exe 直接显示主窗口；仅开机自启（注册表项带 --minimized）静默进托盘
+    start_minimized = "--minimized" in sys.argv
     App(start_minimized)
 
 

@@ -174,6 +174,7 @@ class MainWindow:
         self.tree.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
         self.tree.bind("<Double-1>", self._on_mail_open)
+        self.tree.bind("<Button-3>", self._mail_list_menu)
         # 行样式：未读加粗着色 + 隔行底色
         self.tree.tag_configure("unread", font=FONT_UI_B, foreground=ACCENT_DARK)
         self.tree.tag_configure("odd", background=ROW_ALT)
@@ -198,6 +199,7 @@ class MainWindow:
         self.txt_body.configure(yscrollcommand=bsb.set)
         self.txt_body.pack(side="left", fill="both", expand=True)
         bsb.pack(side="right", fill="y")
+        self.txt_body.bind("<Button-3>", self._body_menu)
         right.add(body_card, weight=2)
 
         # 应用上次记忆的收起状态
@@ -261,9 +263,11 @@ class MainWindow:
                 pill.pack(side="right", padx=(0, 10), pady=8)
             for w in (row,):
                 w.bind("<Button-1>", lambda e, aid=account_id: self._select_account(aid))
+                w.bind("<Button-3>", lambda e, aid=account_id: self._account_menu(aid, e))
             for child in row.winfo_children():
                 for w in ([child] + list(child.winfo_children())):
                     w.bind("<Button-1>", lambda e, aid=account_id: self._select_account(aid))
+                    w.bind("<Button-3>", lambda e, aid=account_id: self._account_menu(aid, e))
             self._account_rows.append((row, account_id))
 
         total = db.unread_count()
@@ -330,6 +334,65 @@ class MainWindow:
         self.txt_body.insert("end", "─" * 60 + "\n\n", "divider")
         self.txt_body.insert("end", body, "body")
         self.txt_body.configure(state="disabled")
+
+    # ---------- 复制与右键菜单 ----------
+    def _copy_to_clipboard(self, text: str, label: str = "内容"):
+        text = (text or "").strip()
+        if not text:
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+        preview = text if len(text) <= 24 else text[:24] + "…"
+        self.var_status.set(f"已复制{label}：{preview}")
+
+    def _mail_list_menu(self, event):
+        """邮件列表右键：复制主题/发件人/邮箱地址/正文。"""
+        row = self.tree.identify_row(event.y)
+        if not row:
+            return
+        self.tree.selection_set(row)
+        mail = db.get_mail(int(row))
+        if mail is None:
+            return
+        menu = tk.Menu(self.root, tearoff=0)
+        subj = mail["subject"] or ""
+        name = mail["from_name"] or ""
+        addr = mail["from_addr"] or ""
+        for label, val in (
+            ("复制主题", subj),
+            ("复制发件人", name),
+            ("复制发件人邮箱", addr),
+            ("复制正文", mail["body_text"] or ""),
+        ):
+            menu.add_command(label=label, state="normal" if val.strip() else "disabled",
+                             command=lambda v=val, l=label[2:]: self._copy_to_clipboard(v, l))
+        menu.tk_popup(event.x_root, event.y_root)
+
+    def _account_menu(self, account_id: str | None, event):
+        """账户面板右键：复制邮箱地址/账户名。"""
+        if not account_id:
+            return  # "全部邮件"卡片无地址可复制
+        acc = self.manager.get(account_id)
+        if acc is None:
+            return
+        menu = tk.Menu(self.root, tearoff=0)
+        menu.add_command(label="复制邮箱地址", command=lambda: self._copy_to_clipboard(acc.email, "邮箱地址"))
+        menu.add_command(label="复制账户名", command=lambda: self._copy_to_clipboard(acc.name, "账户名"))
+        menu.tk_popup(event.x_root, event.y_root)
+
+    def _body_menu(self, event):
+        """阅读区右键：复制选中 / 全选。"""
+        menu = tk.Menu(self.root, tearoff=0)
+        menu.add_command(label="复制", command=self._copy_body_selection)
+        menu.add_command(label="全选", command=lambda: self.txt_body.tag_add("sel", "1.0", "end"))
+        menu.tk_popup(event.x_root, event.y_root)
+
+    def _copy_body_selection(self):
+        try:
+            text = self.txt_body.get("sel.first", "sel.last")
+        except tk.TclError:
+            text = ""
+        self._copy_to_clipboard(text, "选中内容")
 
     def fetch_now(self):
         n = 0

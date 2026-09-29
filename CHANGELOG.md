@@ -8,6 +8,42 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versio
 
 ---
 
+## [1.1.1] — 2026-09-29
+
+Copy-anywhere support and a friendlier launch behavior. · 全局复制能力与更友好的启动行为。
+
+### Added · 新增
+
+**English**
+
+- Right-click **Copy** everywhere:
+  - Mail list → copy subject, sender name, sender e-mail address, or the full body
+  - Account panel → copy an account's e-mail address or display name (handy for grabbing your own address)
+  - Reading pane → copy the selected text or select all (subject fragments included)
+- Status-bar confirmation after every copy; empty fields are grayed out instead of copying nothing
+
+**中文**
+
+- 全局右键复制：
+  - 邮件列表 → 复制主题、发件人姓名、发件人邮箱地址、整封正文
+  - 账户面板 → 复制账户邮箱地址或账户名（拿自己的地址一步到位）
+  - 阅读区 → 复制选中文本或全选（标题任意片段都可选）
+- 每次复制在状态栏提示"已复制"；空字段置灰，避免复制到空值
+
+### Changed · 变更
+
+**English**
+
+- Launch behavior: double-clicking the exe now opens the main window directly; only the auto-start entry (`--minimized`) still boots silently to the tray
+- `start_minimized` config key kept for compatibility but no longer drives launch visibility
+
+**中文**
+
+- 启动行为：双击 exe 直接显示主窗口；仅开机自启入口（`--minimized` 参数）保持静默进托盘
+- `start_minimized` 配置键保留兼容，但不再决定启动时是否显示窗口
+
+---
+
 ## [1.1.0] — 2026-09-29
 
 Sending mail, single-instance behavior, and UI refinements. · 新增发信能力、单实例行为与界面优化。

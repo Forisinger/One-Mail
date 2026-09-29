@@ -18,7 +18,7 @@ _DEFAULT: dict[str, Any] = {
         "autostart": True,
         "poll_interval_fallback": 300,   # 不支持 IDLE 时的轮询秒数
         "notify_sound": True,
-        "start_minimized": True,
+        "start_minimized": False,   # 仅作记录；实际静默与否取决于启动参数 --minimized
     },
 }
 
