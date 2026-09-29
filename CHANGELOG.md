@@ -8,7 +8,31 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versio
 
 ---
 
-## [1.6.0] — 2026-09-29
+## [1.6.1] — 2026-09-29
+
+Third review pass fixes over the save-attachment and folder-wire changes. · 三轮复查对保存附件与文件夹线格式的修复。
+
+### Fixed · 修复
+
+**English**
+
+- **Save attachments used the account's *current* folder instead of the mail's source folder** — after changing an account's receive folder, saving attachments of an old mail could silently fetch a *different* mail sharing the same UID; now uses the per-mail `folder` column
+- **`folder_to_wire` mishandled bare `&` in ASCII folder names** (`A&B` is invalid mUTF-7; `Tom&Jerry-x` was misdetected as a wire-format name): ASCII `&` is now always escaped to `&-`, no guessing
+- **A permanently failing UID could head-block all newer mail**: first failure ends the batch (one retry), repeated failures are skipped via a per-client failure memory
+- **IDLE stop no longer downgrades the account**: a stop/pause landing in the continuation-line window no longer sets `idle_supported=False` on the reusable account object
+- `message/rfc822` (.eml) attachments are now saved via `part.as_bytes()` (previously skipped silently); parts with encoding defects are skipped rather than saved as garbage; Windows reserved device names (con/nul/…) suffixed with `_`
+- Deleting the currently-open mail now clears the reading pane and the attachment action
+
+**中文**
+
+- **保存附件误用账户「当前」收信文件夹而非邮件自带来源文件夹**——账户改过文件夹后，旧邮件的附件可能静默取回同 UID 的另一封；改用 mails 行的 `folder` 列
+- **`folder_to_wire` 对纯 ASCII 名中的裸 `&` 处理不合规**（`A&B` 不是合法 mUTF-7；`Tom&Jerry-x` 被误判为线格式）：ASCII `&` 一律转义为 `&-`，去掉猜测逻辑
+- **永久失败的 UID 会队头阻塞其后所有新邮件**：首次失败断批（下轮重试），连续失败按客户端记忆跳过
+- **IDLE 停止不再误降级账户**：停止/暂停落在继续行等待窗口内不再把可复用账户对象标为不支持 IDLE
+- `message/rfc822`（.eml）附件改用 `part.as_bytes()` 保存（此前被静默跳过）；带编码缺陷的部件跳过而非存出垃圾文件；Windows 保留设备名（con/nul/…）追加 `_` 后缀
+- 删除当前正在阅读的邮件后清空阅读区与附件操作
+
+---
 
 Attachment saving from the reading pane (on-demand server re-fetch). · 阅读区保存附件（按需从服务器重新取原文）。
 
@@ -41,6 +65,26 @@ Sortable columns and a real-mailbox end-to-end verification tool. · 列头排�
 
 - **列头排序**：点击 来源 / 发件人 / 主题 / 时间 列头排序（再点反转，列头显示 ▲/▼）；UI 侧排序，与搜索、过滤器自由叠加
 - `tools/verify_163.py`：真实邮箱端到端验证工具（临时数据库，只读效果）——连接、UIDVALIDITY 读取、文件夹列表 mUTF-7 解码、增量抓取水位行为。已对网易 163 实测：6 个文件夹中文名解码正确（草稿箱/已发送/垃圾邮件…），第一轮抓取 4 封未读，第二轮 0 下载且水位不变
+
+---
+
+## [1.6.0] — 2026-09-29
+
+Attachment saving from the reading pane (on-demand server re-fetch). · 阅读区保存附件（按需从服务器重新取原文）。
+
+### Added · 新增
+
+**English**
+
+- **Save attachments**: reading-pane right-click → 保存附件… — pick a folder and OneMail fetches the raw message from the server by UID (BODY.PEEK[], read-only), extracts every attachment with proper RFC 2047 name decoding (Chinese names intact) and writes them out, deduplicating name collisions as `name(1).ext`. Runs on a worker thread with status-bar progress/errors
+- `MailClient.fetch_raw()` + `parser.extract_attachments()`: reusable, offline-testable building blocks; name-collision and unnamed-attachment edge cases handled
+- Verified end-to-end against a live NetEase 163 mailbox (fetch_raw returns the original bytes)
+
+**中文**
+
+- **保存附件**：阅读区右键 →「保存附件…」——选择目录后按 UID 从服务器重新取回邮件原文（BODY.PEEK[]，不打已读标记），解析出全部附件（RFC 2047 文件名解码、中文名完好）后写出，重名自动加 `(1)` 后缀。后台线程执行，状态栏显示进度与错误
+- `MailClient.fetch_raw()` + `parser.extract_attachments()`：可复用、可离线单测的构件；处理重名与未命名附件边界
+- 已对网易 163 真实邮箱端到端验证（fetch_raw 返回原始字节）
 
 ---
 

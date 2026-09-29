@@ -453,7 +453,13 @@ class MainWindow:
         sel = self.tree.selection()
         if not sel:
             return
-        db.delete_mail(int(sel[0]))
+        mail_id = int(sel[0])
+        db.delete_mail(mail_id)
+        if self._current_mail and self._current_mail["id"] == mail_id:
+            self._current_mail = None
+            self.txt_body.configure(state="normal")
+            self.txt_body.delete("1.0", "end")
+            self.txt_body.configure(state="disabled")
         self.refresh_mails()
         self.refresh_accounts()
         self.var_status.set("已从本地缓存删除该邮件（服务器不受影响）")
@@ -500,7 +506,9 @@ class MainWindow:
         if not dest:
             return
         pwd = self.manager.password(acc.id)
-        uid, folder = mail["uid"], getattr(acc, "folder", "INBOX")
+        # 邮件行自带来源文件夹：账户后来改过收信文件夹时，
+        # 用 acc.folder 会在错误的文件夹里按 UID 取到另一封邮件
+        uid, folder = mail["uid"], (mail["folder"] or getattr(acc, "folder", "INBOX"))
         self.var_status.set("正在从服务器取回邮件原文…")
 
         def work():
@@ -511,8 +519,12 @@ class MainWindow:
                     msg = "未在服务器原文中解析出附件"
                 else:
                     saved = 0
+                    reserved = {"CON", "PRN", "AUX", "NUL"} | {
+                        f"{p}{i}" for p in ("COM", "LPT") for i in range(1, 10)}
                     for name, data in atts:
                         safe = os.path.basename(name.replace("\\", "_")) or "附件"
+                        if os.path.splitext(safe)[0].upper() in reserved:
+                            safe += "_"   # Windows 保留设备名（con/nul/...）不可作文件名
                         path = os.path.join(dest, safe)
                         stem, ext = os.path.splitext(path)
                         n = 1

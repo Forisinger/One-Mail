@@ -51,6 +51,7 @@ class MailClient:
         self._wake = threading.Event()   # 「立即收信」唤醒信号
         self._thread: threading.Thread | None = None
         self._conn: imaplib.IMAP4 | None = None   # 供 stop() 关 socket 打断阻塞
+        self._failed_uids: set[str] = set()  # 单封失败记忆：二次失败跳过防队头阻塞
 
     # ---------- 生命周期 ----------
     def start(self):
@@ -221,6 +222,8 @@ class MailClient:
                 self.account.idle_supported = False   # 服务器 tagged 拒绝 IDLE
                 return False
         else:
+            if self._stop.is_set():
+                return False   # 停止/暂停打断：不改 idle_supported（可复用账户对象）
             self.account.idle_supported = False
             return False
 
@@ -322,8 +325,11 @@ class MailClient:
             typ, msgdata = conn.uid("fetch", uid, "(BODY.PEEK[])")
             if (typ != "OK" or not msgdata or not msgdata[0]
                     or not isinstance(msgdata[0], tuple)):
-                # 本封抓取失败：终止本批，水位只推进到已成功的部分，
-                # 失败邮件下轮仍会被 UNSEEN 搜出并续抓
+                # 本封抓取失败：水位只推进到已成功的部分。首次失败断批
+                # （下轮重试），连续失败则跳过——防一封坏邮件永久挡住其后新邮件
+                if uid.decode() in self._failed_uids:
+                    continue
+                self._failed_uids.add(uid.decode())
                 break
             raw = msgdata[0][1]
             parsed = parse_raw(raw)
@@ -436,18 +442,20 @@ class MailClient:
 
 
 def folder_to_wire(name: str) -> str:
-    """IMAP 协议层的文件夹名：带引号 + 非 ASCII 名转回修改版 UTF-7。
+    """IMAP 协议层的文件夹名：带引号 + 修改版 UTF-7 编码。
 
     imaplib 以 ascii 编码命令且不加引号：中文名会 UnicodeEncodeError，
-    含空格的名字会被拆成多个 atom 被服务器拒绝——都必须在此转换。
+    含空格的名字会被拆成多个 atom 被服务器拒绝——统一转码并加引号。
+    注意：纯 ASCII 的 `&` 也必须转义为 `&-`（mUTF-7 规范），因此
+    含 `&` 的 ASCII 名同样走编码，不做"原始名直通"猜测。
     """
-    if re.search(r"&[0-9A-Za-z,+\-]+-", name):
-        return f'"{name}"'   # 已经是服务器原始 mUTF-7 线格式：原样使用
     try:
         name.encode("ascii")
-        return f'"{name}"'
+        if "&" not in name:
+            return f'"{name}"'
     except UnicodeEncodeError:
-        return f'"{_encode_mutf7(name)}"'
+        pass
+    return f'"{_encode_mutf7(name)}"'
 
 
 def _decode_mutf7(name: str) -> str:

@@ -243,7 +243,14 @@ def extract_attachments(raw: bytes) -> list[tuple[str, bytes]]:
                 if not (disp and "attachment" in disp.lower()):
                     continue
                 filename = "(未命名附件)"
-            payload = part.get_payload(decode=True)
+            if part.defects:
+                continue   # 编码声明与实际不符（如损坏 base64）：宁缺毋滥
+            if part.get_content_maintype() == "message":
+                # message/rfc822（.eml）附件：get_payload(decode=True) 返回
+                # None，用原始字节作为内容保存
+                payload = part.as_bytes()
+            else:
+                payload = part.get_payload(decode=True)
             if payload is None:
                 continue
             out.append((_decode_header_value(filename), payload))

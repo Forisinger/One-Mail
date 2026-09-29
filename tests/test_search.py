@@ -176,10 +176,13 @@ class SearchFolderTests(unittest.TestCase):
         acc.folder = "Sent Messages"
         self.assertEqual(MailClient(acc, "", None, None)._folder_wire(),
                          '"Sent Messages"')
-        # 用户直接填服务器原始名：原样使用不二次编码
-        acc.folder = "&XfJT0ZAB-"
+        # 纯 ASCII 的 & 必须转义为 &-（mUTF-7 规范），不做原始名直通猜测
+        acc.folder = "A&B"
         self.assertEqual(MailClient(acc, "", None, None)._folder_wire(),
-                         '"&XfJT0ZAB-"')
+                         '"A&-B"')
+        acc.folder = "Tom&Jerry-x"
+        self.assertEqual(MailClient(acc, "", None, None)._folder_wire(),
+                         '"Tom&-Jerry-x"')
 
 
 if __name__ == "__main__":
