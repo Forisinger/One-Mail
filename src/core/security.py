@@ -8,6 +8,7 @@ from __future__ import annotations
 import ctypes
 import json
 import os
+import threading
 from ctypes import wintypes
 
 if os.name != "nt":  # 非 Windows 环境（开发/测试用）退化为明文混淆
@@ -59,6 +60,7 @@ def data_dir() -> str:
 
 
 _SECRETS = os.path.join(data_dir(), "secrets.bin")
+_LOCK = threading.Lock()   # secrets.bin 读改写序列化，与 config 的锁同语义
 
 
 def _atomic_write(text: str) -> None:
@@ -73,28 +75,29 @@ def save_password(account_id: str, password: str) -> None:
     """保存（加密）一个账户的密码。
 
     读取现有密码库失败时**不清空**——备份损坏文件后把新密码并入库会
-    导致其余账户密码永久丢失，因此这里选择抛出让上层感知。
+    导致其余账户密码全部丢失，因此这里选择抛出让上层感知。
     """
-    store: dict = {}
-    if os.path.exists(_SECRETS):
-        raw = _read_secrets()
-        try:
-            store = json.loads(raw)
-        except Exception:
-            if raw.strip():
-                # 密码库损坏：备份后报错，避免空库覆盖造成全部密码丢失
-                try:
-                    os.replace(_SECRETS, _SECRETS + ".corrupt")
-                except OSError:
-                    pass
-                raise OSError("secrets.bin 已损坏（已备份为 secrets.bin.corrupt），"
-                              "为防密码丢失未执行覆盖，请重新录入各账户授权码")
-            store = {}
-    if _DPAPI:
-        store[account_id] = _dpapi_protect(password.encode("utf-8")).hex()
-    else:
-        store[account_id] = password  # 非 Windows 测试环境明文
-    _atomic_write(json.dumps(store, ensure_ascii=False))
+    with _LOCK:
+        store: dict = {}
+        if os.path.exists(_SECRETS):
+            raw = _read_secrets()
+            try:
+                store = json.loads(raw)
+            except Exception:
+                if raw.strip():
+                    # 密码库损坏：备份后报错，避免空库覆盖造成全部密码丢失
+                    try:
+                        os.replace(_SECRETS, _SECRETS + ".corrupt")
+                    except OSError:
+                        pass
+                    raise OSError("secrets.bin 已损坏（已备份为 secrets.bin.corrupt），"
+                                  "为防密码丢失未执行覆盖，请重新录入各账户授权码")
+                store = {}
+        if _DPAPI:
+            store[account_id] = _dpapi_protect(password.encode("utf-8")).hex()
+        else:
+            store[account_id] = password  # 非 Windows 测试环境明文
+        _atomic_write(json.dumps(store, ensure_ascii=False))
 
 
 def load_password(account_id: str) -> str:
@@ -113,14 +116,15 @@ def load_password(account_id: str) -> str:
 
 
 def delete_password(account_id: str) -> None:
-    if not os.path.exists(_SECRETS):
-        return
-    try:
-        store = json.loads(_read_secrets())
-        store.pop(account_id, None)
-        _atomic_write(json.dumps(store, ensure_ascii=False))
-    except Exception:
-        pass
+    with _LOCK:
+        if not os.path.exists(_SECRETS):
+            return
+        try:
+            store = json.loads(_read_secrets())
+            store.pop(account_id, None)
+            _atomic_write(json.dumps(store, ensure_ascii=False))
+        except Exception:
+            pass
 
 
 def _read_secrets() -> str:

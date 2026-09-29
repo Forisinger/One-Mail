@@ -65,7 +65,7 @@ pyinstaller build.spec --noconfirm
 1. Double-clicking the exe opens the **main window** directly; when launched by auto-start it goes silently to the tray (red badge shows unread count / 红色角标显示未读数). Re-launching the exe while running wakes the window to front.
 2. Click **添加账户 / Add Account**, enter your address and **authorization code**.
 3. Done — new mail shows up in the list, labeled by source, with balloon notifications.
-4. Copy anything with a right-click: subject / sender / e-mail address from the mail list, your own account address from the account panel, or any selected text in the reading pane.
+4. Copy anything with a right-click: subject / sender / e-mail address from the mail list, your own account address from the account panel, or any selected text in the reading pane. The reading pane's right-click also offers **保存附件… (save attachments)**. Click the column headers (来源 / 发件人 / 主题 / 时间) to sort, and use the 🔍 search box + 全部/只看未读/有附件 filter to find mails — body text is searched too.
 
 右键即可复制：邮件列表可复制主题/发件人/邮箱地址，账户面板可复制自己的邮箱地址，阅读区任意选中文本均可复制。
 

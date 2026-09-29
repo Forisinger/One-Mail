@@ -81,6 +81,7 @@ class MainWindow:
         self._sort_desc = True
         self._col_titles = {}
         self._current_mail = None    # 阅读区当前邮件（保存附件用）
+        self._account_status: dict[str, str] = {}   # 账户最近连接状态（v1.6.2）
         self._account_rows: list[tuple[tk.Frame, str | None]] = []
         self._collapsed = bool(
             config_store.load().get("settings", {}).get("accounts_collapsed", False)
@@ -295,6 +296,13 @@ class MainWindow:
         self._search_job = None
         self.refresh_mails()
 
+    def set_account_status(self, account_id: str, text: str):
+        """记录账户最近状态并刷新对应卡片（连接/推送/异常等）。"""
+        if self._account_status.get(account_id) == text:
+            return
+        self._account_status[account_id] = text
+        self.refresh_accounts()
+
     def refresh_accounts(self):
         """重建账户卡片列表（账户数通常很少，直接重建即可）。"""
         for frame, _ in self._account_rows:
@@ -335,7 +343,9 @@ class MainWindow:
         for acc in self.manager.all():
             n = db.unread_count(acc.id)
             state = "" if acc.enabled else "（已停用）"
-            _add_row(acc.name + state, acc.id, n, sub=acc.email)
+            status = self._account_status.get(acc.id, "")
+            sub = acc.email + (f"　·　{status}" if status else "")
+            _add_row(acc.name + state, acc.id, n, sub=sub)
 
     def _select_account(self, account_id: str | None):
         self._filter_account = account_id
@@ -645,6 +655,7 @@ class MainWindow:
         self.scheduler.stop_account(acc.id)
         self.manager.remove(acc.id)
         db.delete_account_mails(acc.id)
+        self._account_status.pop(acc.id, None)
         self._filter_account = None
         self.full_refresh()
         self.root.event_generate("<<UnreadChanged>>", when="tail")

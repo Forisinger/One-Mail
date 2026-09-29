@@ -102,6 +102,7 @@ class App:
                 self._handle_new_mail(evt["account"], evt["mails"])
             elif evt["type"] == EV_STATUS:
                 acc, text = evt["account"], evt["text"]
+                self.window.set_account_status(acc.id, text)
                 self.window.set_status(f"[{acc.name}] {text}")
                 self._log(f"[{acc.email}] {text}")
         # 2) 托盘命令
