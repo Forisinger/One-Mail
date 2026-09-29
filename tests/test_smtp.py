@@ -3,6 +3,7 @@
 import os
 import sys
 import tempfile
+import tkinter as tk
 import unittest
 from email import message_from_bytes
 
@@ -11,6 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from core.account import Account
 from core.smtp_client import build_mime
 from ui.compose_window import ComposeWindow
+from ui.richtext import text_to_html, font_tag_name
 
 
 def _acc():
@@ -77,6 +79,70 @@ class TestBuildMime(unittest.TestCase):
     def test_empty_subject_fallback(self):
         msg = build_mime(_acc(), ["a@b.com"], "", "x")
         self.assertIsNotNone(msg["Subject"])
+
+
+class TestCcBccHtml(unittest.TestCase):
+    def test_cc_header(self):
+        msg = build_mime(_acc(), ["a@b.com"], "s", "x", cc_addrs=["c@d.com"])
+        self.assertEqual(msg["Cc"], "c@d.com")
+
+    def test_bcc_header_present_for_envelope(self):
+        msg = build_mime(_acc(), ["a@b.com"], "s", "x", bcc_addrs=["b@d.com"])
+        self.assertEqual(msg["Bcc"], "b@d.com")  # send_message 发送时剥离
+
+    def test_html_generates_alternative(self):
+        msg = build_mime(_acc(), ["a@b.com"], "s", "plain",
+                         html_body="<b>bold</b>")
+        self.assertEqual(msg.get_content_type(), "multipart/alternative")
+        parts = msg.get_payload()
+        self.assertEqual(parts[0].get_content_type(), "text/plain")
+        self.assertEqual(parts[1].get_content_type(), "text/html")
+
+    def test_html_with_attachments_wraps_twice(self):
+        msg = build_mime(_acc(), ["a@b.com"], "s", "p", attachments=[],
+                         html_body="<i>x</i>")
+        self.assertEqual(msg.get_content_type(), "multipart/alternative")
+
+
+class TestTextToHtml(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        try:
+            cls.root = tk.Tk()
+            cls.root.withdraw()
+        except tk.TclError:
+            cls.root = None
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls.root:
+            cls.root.destroy()
+
+    def setUp(self):
+        if not self.root:
+            self.skipTest("无显示环境，跳过 Tk 相关测试")
+
+    def test_plain_text_escapes_and_br(self):
+        w = tk.Text(self.root)
+        w.insert("1.0", "a<b\nline2")
+        out = text_to_html(w)
+        self.assertEqual(out, "a&lt;b<br>\nline2")
+
+    def test_bold_tag_export(self):
+        w = tk.Text(self.root)
+        w.insert("1.0", "hello world")
+        w.tag_add(font_tag_name(True, False, False), "1.0", "1.5")
+        out = text_to_html(w)
+        self.assertIn("<b>hello</b>", out)
+        self.assertIn(" world", out)
+
+    def test_color_export(self):
+        w = tk.Text(self.root)
+        w.insert("1.0", "red")
+        w.tag_configure("color-#ff0000", foreground="#ff0000")
+        w.tag_add("color-#ff0000", "1.0", "end")
+        out = text_to_html(w)
+        self.assertIn('<span style="color:#ff0000">red</span>', out)
 
 
 class TestAddressParsing(unittest.TestCase):

@@ -13,6 +13,8 @@
 | 📬 Multi-account IMAP fetching | 多账户 IMAP 收信 |
 | 🏷️ Every mail labeled by source account, list filterable per account | 邮件标注来源账户，可按账户筛选 |
 | ✉️ Compose & reply with attachments, sent on a background thread | 写邮件与回复，支持附件，后台线程发送不卡界面 |
+| 🎨 Rich-text body (bold/italic/underline/color) with HTML + plain fallback | 富文本正文（加粗/斜体/下划线/颜色），HTML + 纯文本双版本 |
+| 📋 CC & BCC support | 支持抄送与密送 |
 | 📤 Sent-mail sync to the server's Sent folder (best-effort) | 发送后尽力同步到服务器"已发送"文件夹 |
 | 🖥️ Single instance: re-launching the exe brings the window to front | 单实例：再次启动自动唤醒主窗口置前 |
 | 🗂️ Collapsible account panel with unread badges | 账户面板可收起，带未读徽章 |
@@ -88,7 +90,7 @@ Details in the docs / 详细文档：[English](docs/technical-doc.md) · [中文
 
 - [ ] OAuth2 for Gmail/Outlook / Gmail 与 Outlook 的 OAuth2 登录
 - [x] Send & reply / 发信与回复 ✅ v1.1.0
-- [ ] CC/BCC fields, HTML mail / 抄送密送、HTML 富文本
+- [x] CC/BCC fields, rich-text (HTML) mail / 抄送密送、富文本邮件 ✅ v1.2.0
 - [ ] Mail search & filter rules / 邮件搜索与过滤规则
 - [ ] Folder selection / 收信文件夹选择
 

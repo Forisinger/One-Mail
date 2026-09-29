@@ -68,7 +68,8 @@ OneMail/
 │   │   └── config.py      # config.json read/write
 │   ├── ui/
 │   │   ├── main_window.py # main window (collapsible accounts / mail list / reader)
-│   │   ├── compose_window.py # compose window (new mail & reply, threaded send)
+│   │   ├── compose_window.py # compose window (CC/BCC, rich text, threaded send)
+│   │   ├── richtext.py    # Tk Text rich-text tags → HTML export
 │   │   ├── tray.py        # tray icon, menu, unread badge
 │   │   ├── icon.py        # programmatic icon + badge rendering
 │   │   └── account_dialog.py
@@ -145,6 +146,8 @@ CREATE INDEX idx_mails_account ON mails(account_id, received_at DESC);
 ### 3. Outgoing mail (SMTP, smtp_client.py)
 - SMTP endpoint derived from the IMAP host (`imap.x.com → smtp.x.com:465`, SSL); overridable via `smtp_host`/`smtp_port` on the account
 - `build_mime()` is offline-testable: UTF-8 headers via `email.header`; non-ASCII attachment filenames encoded per RFC 2231 (recipients see them decoded correctly)
+- **v1.2**: `cc_addrs`/`bcc_addrs`/`html_body` — Cc written as a header; Bcc written as a header and stripped by `send_message` (still included in the envelope); `html_body` produces `multipart/alternative` (plain-text fallback + HTML)
+- **v1.2 rich text**: `ui/richtext.py` walks the Tk Text tags character-by-character and exports `<b>/<i>/<u>/<span style>` HTML; a per-character combined font-tag model (7 b/i/u combos + independent color tags) avoids Tk tag-priority conflicts
 - `send_mail()` runs on a **worker thread** (`SMTP_SSL → login → send_message`); the UI stays responsive and the send button is locked against double-clicks
 - `save_to_sent()` is best-effort: a short IMAP connection probes the Sent/已发送 folder and APPENDs; any failure degrades silently (163 keeps sent mail server-side anyway)
 - SMTP server rejections (554/551 etc.) are surfaced verbatim in the error dialog for easy diagnosis

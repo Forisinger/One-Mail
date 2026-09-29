@@ -8,6 +8,42 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versio
 
 ---
 
+## [1.2.0] — 2026-09-29
+
+CC/BCC recipients and rich-text (HTML) composing. · 抄送/密送与 HTML 富文本写信。
+
+### Added · 新增
+
+**English**
+
+- **CC & BCC fields** in the compose window; multiple addresses per field (comma/semicolon/space separated); BCC recipients stay hidden from each other per standard semantics
+- **Rich-text body**: bold / italic / underline / font color via a format toolbar in the compose window (pure tkinter tags, zero new dependencies)
+- Sent as `multipart/alternative` — HTML version plus an automatic plain-text fallback, so every client renders something sensible
+- Recipients without any formatting still go out as plain text (unchanged behavior)
+
+**中文**
+
+- 写信窗口新增**抄送（CC）/密送（BCC）**输入行；每行支持逗号/分号/空格分隔多个地址；密送收件人互相不可见（标准语义）
+- **富文本正文**：写信窗口格式工具条支持**加粗 / 斜体 / 下划线 / 字体颜色**（纯 tkinter 标签实现，零新增依赖）
+- 发送时生成 `multipart/alternative`——HTML 版本 + 自动纯文本兜底，任何客户端都能正常显示
+- 未使用任何格式时仍按纯文本发送（行为不变）
+
+### Changed · 变更
+
+**English**
+
+- `build_mime()`/`send_mail()` accept optional `cc_addrs/bcc_addrs/html_body`; envelope recipients = To + Cc + Bcc
+- New `ui/richtext.py`: Text-widget tags → HTML export (offline-testable); unit suite grew to 15 cases
+- Real-send verified against NetEase 163: alternative/HTML part, Cc header and self-CC delivery all confirmed
+
+**中文**
+
+- `build_mime()`/`send_mail()` 新增可选参数 `cc_addrs/bcc_addrs/html_body`；信封收件人 = 收件人 + 抄送 + 密送
+- 新增 `ui/richtext.py`：Text 标签 → HTML 导出（可离线单测）；单测增至 15 例
+- 已实测网易 163 真实链路：alternative/HTML 分部、Cc 头、抄送投递均确认正常
+
+---
+
 ## [1.1.1] — 2026-09-29
 
 Copy-anywhere support and a friendlier launch behavior. · 全局复制能力与更友好的启动行为。
