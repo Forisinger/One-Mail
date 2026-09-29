@@ -213,6 +213,13 @@ CREATE INDEX idx_mails_account ON mails(account_id, received_at DESC);
 - Body text truncated to 64 KB on ingest to bound DB growth
 - All worker threads are daemons; process exit reclaims everything
 
+### 16. Read-flag sync (v1.7.0, flag_sync.py)
+- **Separation of concerns**: the fetch channel stays strictly `readonly`; flag writes run on a dedicated **short-lived connection** (connect → non-readonly SELECT → `UID STORE .SILENT` → logout), fully isolated from the long-lived polling socket; the SELECT result is checked (imaplib returns `NO` — not an exception — for a missing folder, which would otherwise misdirect debugging to a bogus state-machine error)
+- **Async batching**: the UI thread only `submit()`s jobs (deduped by account/folder/uid/seen); the worker merges a batch, groups by (account, folder, seen), sorts UIDs numerically (non-numeric UIDs are filtered defensively) and STOREs them in chunks of 50 — "mark all read" costs one connection per group; the tray "mark all read" covers all accounts, the toolbar button respects the current account filter
+- **Failure policy**: per-chunk retry once, then drop with a log entry (successful chunks are never resent; the operation is idempotent, dropping loses nothing); deleted accounts / missing passwords are dropped immediately; every exception path releases the dedup keys so a leaked key can never permanently silence future syncs for that mail
+- **Toggle**: tray check item "同步已读到服务器" reads/writes `settings.sync_read_flags` (default on; the `enabled` callback re-reads config each time so toggling takes effect immediately); when off, jobs are discarded before touching the network
+- **Testability**: `connector` / `get_credentials` / `enabled` are all constructor-injected (default `MailClient.mark_seen`), and `start_thread=False` allows direct offline testing of grouping/chunking/retry (14 tests)
+
 ## 6. Runtime & Data Locations
 
 ```
@@ -234,4 +241,5 @@ Build: `pyinstaller build.spec --noconfirm` → `dist/OneMail.exe`.
 4. **Hardening regression tests** (test_robustness.py, offline): LIKE escaping, config atomicity + corrupt backup, unclosed script/style body recovery, migration idempotency, SMTP Date/Message-ID, domain-boundary matching, local delete
 5. **SMTP unit tests** (test_smtp.py, offline): MIME header encoding, multi-recipient parsing, ASCII/Chinese attachment filenames (RFC 2231), SMTP host derivation — all passing
 6. **Live test**: real NetEase 163 mailbox — connect, auto-poll fallback, fetch with source label, end-to-end OK
-7. **Packaged exe**: boots to tray, connects, fetches, no stderr output
+7. **Flag-sync unit tests** (test_flag_sync.py, offline, v1.7.0): dedup, per-account/folder grouping, numeric UID sort, 50-UID chunking, retry-once-then-drop, kill switch, missing-account safety
+8. **Packaged exe**: boots to tray, connects, fetches, no stderr output

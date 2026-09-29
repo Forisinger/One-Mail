@@ -9,6 +9,7 @@ import queue
 
 import pystray
 
+from storage import config as config_store
 from . import icon as icon_mod
 
 # 托盘 -> UI 的命令类型
@@ -16,6 +17,7 @@ CMD_SHOW = "show"
 CMD_FETCH_NOW = "fetch_now"
 CMD_MARK_ALL = "mark_all"
 CMD_TOGGLE_PAUSE = "toggle_pause"
+CMD_TOGGLE_SYNC = "toggle_sync"
 CMD_QUIT = "quit"
 
 
@@ -46,9 +48,19 @@ class Tray:
                 self._emit(CMD_TOGGLE_PAUSE),
             ),
             pystray.MenuItem("全部标为已读", self._emit(CMD_MARK_ALL)),
+            pystray.MenuItem("同步已读到服务器", self._emit(CMD_TOGGLE_SYNC),
+                             checked=self._sync_checked),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("退出", self._emit(CMD_QUIT)),
         )
+
+    def _sync_checked(self, _item) -> bool:
+        """勾选状态实时读配置（UI 线程切换 config 后菜单自动反映）。"""
+        try:
+            return bool(config_store.load().get("settings", {})
+                        .get("sync_read_flags", True))
+        except Exception:
+            return True
 
     def _emit(self, cmd: str):
         def handler(icon, item):

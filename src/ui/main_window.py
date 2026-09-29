@@ -18,6 +18,7 @@ from tkinter import ttk, filedialog, messagebox
 from PIL import ImageTk
 
 from core.account import Account, AccountManager
+from core.flag_sync import FlagSync
 from storage import database as db
 from storage import config as config_store
 from core.scheduler import Scheduler
@@ -70,10 +71,12 @@ def _setup_style(root: tk.Tk) -> None:
 
 
 class MainWindow:
-    def __init__(self, root: tk.Tk, manager: AccountManager, scheduler: Scheduler):
+    def __init__(self, root: tk.Tk, manager: AccountManager, scheduler: Scheduler,
+                 flag_sync: FlagSync | None = None):
         self.root = root
         self.manager = manager
         self.scheduler = scheduler
+        self.flag_sync = flag_sync   # 已读状态同步（v1.7.0），None = 不同步
         self._filter_account: str | None = None   # None = 全部账户
         self._search_var = tk.StringVar()
         self._filter_var = tk.StringVar(value="全部")
@@ -395,6 +398,7 @@ class MainWindow:
             return
         if not mail["is_read"]:
             db.mark_read(mail["id"])
+            self._sync_read_flags([mail])
             self.refresh_mails()
             self.refresh_accounts()
             self.root.event_generate("<<UnreadChanged>>", when="tail")
@@ -567,8 +571,36 @@ class MainWindow:
                 n += 1
         self.var_status.set(f"已请求 {n} 个账户立即收信")
 
-    def mark_all_read(self):
-        db.mark_all_read(self._filter_account)
+    def _sync_read_flags(self, rows, seen: bool = True):
+        """把已读/未读变化投递给后台线程写回服务器（v1.7.0）。
+
+        只投递、不等待：网络在 flag_sync 后台线程进行，失败只记日志。
+        folder 用邮件行内记录的来源文件夹（教训同保存附件：acc.folder 可能已改）。
+        """
+        if self.flag_sync is None:
+            return
+        jobs = []
+        for r in rows:
+            try:
+                folder = r["folder"] or "INBOX"
+            except (IndexError, KeyError):
+                folder = "INBOX"
+            jobs.append((r["account_id"], folder, r["uid"], seen))
+        self.flag_sync.submit_many(jobs)
+
+    def mark_all_read(self, account_id: str | None | object = "__filter__"):
+        """全部标为已读。
+
+        account_id 默认 "__filter__" = 尊重当前账户筛选（工具栏按钮）；
+        传 None = 全部账户（托盘路径），传账户 id = 指定账户。
+        """
+        if account_id == "__filter__":
+            account_id = self._filter_account
+        # 先取未读行的最小字段集投递同步任务（改库后就查不到了），再更新本地。
+        # 不带 limit：截断会造成"本地已读、服务器永久未读"且无自愈
+        rows = db.unread_rows(account_id)
+        self._sync_read_flags(rows, seen=True)
+        db.mark_all_read(account_id)
         self.full_refresh()
         self.root.event_generate("<<UnreadChanged>>", when="tail")
 
@@ -576,7 +608,11 @@ class MainWindow:
         sel = self.tree.selection()
         if not sel:
             return
-        db.mark_read(int(sel[0]))
+        mail = db.get_mail(int(sel[0]))
+        if mail is None:
+            return
+        db.mark_read(mail["id"])
+        self._sync_read_flags([mail], seen=True)
         self.refresh_mails()
         self.refresh_accounts()
         self.root.event_generate("<<UnreadChanged>>", when="tail")

@@ -262,6 +262,20 @@ def unread_count(account_id: str | None = None) -> int:
         return conn.execute(sql, args).fetchone()["c"]
 
 
+def unread_rows(account_id: str | None = None) -> list[sqlite3.Row]:
+    """未读邮件的最小字段行 (account_id, folder, uid)，供已读同步投递（v1.7.0）。
+
+    与 unread_count 同口径但不限量：mark_all_read 前必须取到完整未读集合，
+    截断会造成"本地已读、服务器永久未读"且无自愈。
+    """
+    sql, args = "SELECT account_id, folder, uid FROM mails WHERE is_read=0", ()
+    if account_id:
+        sql, args = ("SELECT account_id, folder, uid FROM mails "
+                     "WHERE is_read=0 AND account_id=?"), (account_id,)
+    with _LOCK, _conn() as conn:
+        return conn.execute(sql, args).fetchall()
+
+
 def delete_account_mails(account_id: str) -> None:
     with _LOCK, _conn() as conn:
         conn.execute("DELETE FROM mails WHERE account_id=?", (account_id,))

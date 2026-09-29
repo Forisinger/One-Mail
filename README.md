@@ -20,6 +20,7 @@
 | 🔍 Full-text search (incl. body) + Unread / Has-attachment filters | 全文搜索（含正文）+ 未读/有附件快捷筛选 |
 | ↕️ Click-to-sort columns | 列头点击排序 |
 | 📎 Save attachments from the reading pane (on-demand server fetch) | 阅读区保存附件（按需从服务器取原文） |
+| ✅ Read-state sync back to the server (batched \Seen writes, tray toggle) | 已读状态同步回服务器（成批 \Seen 写回，托盘可关） |
 | 📁 Per-account receive-folder selection (default INBOX) | 账户级收信文件夹选择（默认 INBOX） |
 | 📤 Sent-mail sync to the server's Sent folder (best-effort) | 发送后尽力同步到服务器"已发送"文件夹 |
 | 🖥️ Single instance: re-launching the exe brings the window to front | 单实例：再次启动自动唤醒主窗口置前 |
@@ -91,7 +92,7 @@ QQ 邮箱、网易 163/126 等国内邮箱需在网页设置中开启 IMAP **和
 
 每个账户一条守护线程：优先 IDLE 长连接推送（阻塞等待、空闲 CPU 为零），服务器不支持时自动降级轮询；断线指数退避重连；SMTP 发信跑在独立线程（标准库组装 MIME、中文附件名 RFC 2231 编码、尽力同步已发送文件夹）；单实例经 Win32 命名互斥体实现；GBK 等中文编码兜底解析。
 
-Details in the docs / 详细文档：[English](docs/technical-doc.md) · [中文技术文档](docs/技术文档.md) · [Dev Plan](docs/development-plan.md) · [中文开发计划](docs/开发计划.md) · [发邮件开发计划](docs/发邮件开发计划.md) · [搜索过滤与文件夹开发计划](docs/搜索过滤与文件夹开发计划.md) · [稳定性加固开发计划](docs/稳定性加固开发计划.md) · [增量收信开发计划](docs/增量收信开发计划.md)
+Details in the docs / 详细文档：[English](docs/technical-doc.md) · [中文技术文档](docs/技术文档.md) · [Dev Plan](docs/development-plan.md) · [中文开发计划](docs/开发计划.md) · [发邮件开发计划](docs/发邮件开发计划.md) · [搜索过滤与文件夹开发计划](docs/搜索过滤与文件夹开发计划.md) · [稳定性加固开发计划](docs/稳定性加固开发计划.md) · [增量收信开发计划](docs/增量收信开发计划.md) · [已读同步开发计划](docs/已读同步开发计划.md)
 
 ## 🗺️ Roadmap / 后续计划
 
@@ -99,6 +100,7 @@ Details in the docs / 详细文档：[English](docs/technical-doc.md) · [中文
 - [x] CC/BCC fields, rich-text (HTML) mail / 抄送密送、富文本邮件 ✅ v1.2.0
 - [x] Mail search & filter rules / 邮件搜索与过滤规则 ✅ v1.3.0
 - [x] Folder selection / 收信文件夹选择 ✅ v1.3.0
+- [x] Read-state sync to the server / 已读状态同步到服务器 ✅ v1.7.0
 - [ ] OAuth2 for Gmail/Outlook / Gmail 与 Outlook 的 OAuth2 登录
 
 ## 📄 License / 许可证

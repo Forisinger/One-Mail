@@ -20,13 +20,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import tkinter as tk
 
 from core.account import AccountManager
+from core.flag_sync import FlagSync
 from core.scheduler import Scheduler, EV_NEW_MAIL, EV_STATUS
 from notify import send as notify_send
 from single_instance import acquire, notify_running_instance, start_watcher
 from storage import config as config_store, database
 from storage.config import data_dir
 from ui.main_window import MainWindow
-from ui.tray import Tray, CMD_SHOW, CMD_FETCH_NOW, CMD_MARK_ALL, CMD_TOGGLE_PAUSE, CMD_QUIT
+from ui.tray import (Tray, CMD_SHOW, CMD_FETCH_NOW, CMD_MARK_ALL,
+                     CMD_TOGGLE_PAUSE, CMD_TOGGLE_SYNC, CMD_QUIT)
 
 
 class App:
@@ -38,8 +40,25 @@ class App:
 
         database.init()
 
+        # 已读状态同步（v1.7.0）：本地标已读 → 后台短连接 UID STORE \Seen。
+        # 必须在 MainWindow 之前创建（构造函数要注入）。
+        def _get_credentials(account_id):
+            acc = self.manager.get(account_id)
+            if acc is None:
+                return None, None
+            return acc, self.manager.password(acc.id)
+
+        self.flag_sync = FlagSync(
+            _get_credentials,
+            # 每次现读配置：托盘开关切换后立即生效（用启动快照会让开关形同虚设）
+            enabled=lambda: config_store.load().get("settings", {}).get(
+                "sync_read_flags", True),
+            log=self._log,
+        )
+
         self.root = tk.Tk()
-        self.window = MainWindow(self.root, self.manager, self.scheduler)
+        self.window = MainWindow(self.root, self.manager, self.scheduler,
+                                 flag_sync=self.flag_sync)
         self.tray = Tray(self.tray_commands)
 
         self.paused = False
@@ -144,9 +163,11 @@ class App:
             self.show_window()
             self.window.fetch_now()
         elif cmd == CMD_MARK_ALL:
-            database.mark_all_read()
-            self.window.full_refresh()
+            # 托盘语义 = 全部账户（与旧行为一致）；工具栏按钮才尊重当前筛选
+            self.window.mark_all_read(account_id=None)
             self.update_badge()
+        elif cmd == CMD_TOGGLE_SYNC:
+            self._toggle_sync_read()
         elif cmd == CMD_TOGGLE_PAUSE:
             self.paused = not self.paused
             self.tray.set_paused(self.paused)
@@ -159,6 +180,19 @@ class App:
         elif cmd == CMD_QUIT:
             self.quit()
 
+    def _toggle_sync_read(self):
+        """切换「同步已读到服务器」设置（托盘勾选项）。"""
+        try:
+            cfg = config_store.load()
+            cur = bool(cfg.get("settings", {}).get("sync_read_flags", True))
+            cfg.setdefault("settings", {})["sync_read_flags"] = not cur
+            config_store.save(cfg)
+            state = "已开启" if not cur else "已关闭"
+            self.window.set_status(f"已读状态同步到服务器：{state}")
+            self._log(f"sync_read_flags -> {not cur}")
+        except Exception as e:
+            self._log(f"切换已读同步设置失败: {e!r}")
+
     def quit(self):
         try:
             # 兜底：退出前把已排队的事件处理完（确保新邮件已入库/界面已刷新）
@@ -167,6 +201,7 @@ class App:
             pass
         try:
             self.scheduler.stop_all()
+            self.flag_sync.stop()
             self.tray.stop()
             self.root.destroy()
         except Exception:

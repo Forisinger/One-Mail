@@ -8,6 +8,36 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versio
 
 ---
 
+## [1.7.0] — 2026-09-29
+
+Server read-flag sync. · 本地已读状态同步到服务器。
+
+### Added · 新增
+
+**English**
+
+- Read-state sync: marking a mail read (open / mark-read / mark-all-read, from window or tray) now writes the `\Seen` flag back to the server via a short-lived background IMAP connection, so phones and webmail no longer show everything as unread
+- Batched and grouped: jobs are deduplicated, grouped per (account, folder), UIDs numerically sorted and sent in 50-UID `.SILENT` chunks — one connection per group even for "mark all read"; failed chunks (only) retry once, then drop silently (idempotent operation, no data loss); everything is logged to onemail.log
+- New tray toggle "同步已读到服务器" (config `sync_read_flags`, default on) for users who want OneMail to stay strictly read-only
+
+**中文**
+
+- 已读状态同步：本地标已读（打开邮件 / 标记已读 / 全部已读，主窗口或托盘均可）后，后台用独立短连接执行 `UID STORE \Seen` 写回服务器，手机/网页端不再整屏未读
+- 成批合并：任务去重、按 (账户, 文件夹) 分组、UID 数值排序、每 50 个一批 `.SILENT` STORE——「全部已读」也只占每个分组一次连接；仅失败的批次重试 1 次后丢弃（已读同步幂等，无丢失风险）；过程记录到 onemail.log
+- 托盘新增勾选项「同步已读到服务器」（配置 `sync_read_flags`，默认开启），希望 OneMail 严格只读的用户可关闭
+
+### Security · 安全
+
+**English**
+
+- Fetch path stays strictly `readonly` + `BODY.PEEK`; flag writes run on a separate short-lived connection so the polling channel's socket state can never be affected
+
+**中文**
+
+- 收信通道保持严格 `readonly` + `BODY.PEEK`；改标志走独立短连接，与收信长连接的 socket 状态完全隔离
+
+---
+
 ## [1.6.2] — 2026-09-29
 
 Per-account connection status in the account panel. · 账户面板显示各账户最近连接状态。
@@ -23,6 +53,7 @@ Per-account connection status in the account panel. · 账户面板显示各账�
 - 账户卡片内联显示最近连接状态（已连接 / 收到新邮件推送 / 轮询中 / 连接异常…），异常账户一眼可见，不再只靠状态栏一闪而过的文字
 
 ---
+
 
 ## [1.6.1] — 2026-09-29
 
@@ -50,6 +81,7 @@ Third review pass fixes over the save-attachment and folder-wire changes. · 三
 
 ---
 
+
 ## [1.6.0] — 2026-09-29
 
 Attachment saving from the reading pane (on-demand server re-fetch). · 阅读区保存附件（按需从服务器重新取原文）。
@@ -70,6 +102,7 @@ Attachment saving from the reading pane (on-demand server re-fetch). · 阅读�
 
 ---
 
+
 ## [1.5.2] — 2026-09-29
 
 Sortable columns and a real-mailbox end-to-end verification tool. · 列头排序与真实邮箱端到端验证工具。
@@ -87,6 +120,7 @@ Sortable columns and a real-mailbox end-to-end verification tool. · 列头排�
 - `tools/verify_163.py`：真实邮箱端到端验证工具（临时数据库，只读效果）——连接、UIDVALIDITY 读取、文件夹列表 mUTF-7 解码、增量抓取水位行为。已对网易 163 实测：6 个文件夹中文名解码正确（草稿箱/已发送/垃圾邮件…），第一轮抓取 4 封未读，第二轮 0 下载且水位不变
 
 ---
+
 
 ## [1.5.1] — 2026-09-29
 
@@ -136,6 +170,7 @@ Incremental fetching (no more re-downloading all unseen mail) and attachment nam
 
 ---
 
+
 ## [1.5.0] — 2026-09-29
 
 Incremental fetching (no more re-downloading all unseen mail) and attachment names in the reading pane. · 增量收信（不再反复整封下载未读邮件）与阅读区附件名展示。
@@ -157,6 +192,7 @@ Incremental fetching (no more re-downloading all unseen mail) and attachment nam
 - 托盘角标数字改用 TrueType 字体（64px 下更大更清晰，失败回退）；无 Shell/托盘环境优雅降级；启动时逐个提示全部缺授权码的账户
 
 ---
+
 
 ## [1.4.0] — 2026-09-29
 
@@ -214,6 +250,7 @@ Hardening release from a three-way multi-agent code audit: data-loss prevention,
 
 ---
 
+
 ## [1.3.0] — 2026-09-29
 
 Full-text search with filters, and per-account receive-folder selection. · 全文搜索与过滤，账户级收信文件夹选择。
@@ -254,6 +291,7 @@ Full-text search with filters, and per-account receive-folder selection. · 全�
 
 ---
 
+
 ## [1.2.0] — 2026-09-29
 
 CC/BCC recipients and rich-text (HTML) composing. · 抄送/密送与 HTML 富文本写信。
@@ -290,6 +328,7 @@ CC/BCC recipients and rich-text (HTML) composing. · 抄送/密送与 HTML 富�
 
 ---
 
+
 ## [1.1.1] — 2026-09-29
 
 Copy-anywhere support and a friendlier launch behavior. · 全局复制能力与更友好的启动行为。
@@ -325,6 +364,7 @@ Copy-anywhere support and a friendlier launch behavior. · 全局复制能力与
 - `start_minimized` 配置键保留兼容，但不再决定启动时是否显示窗口
 
 ---
+
 
 ## [1.1.0] — 2026-09-29
 
@@ -367,6 +407,7 @@ Sending mail, single-instance behavior, and UI refinements. · 新增发信能�
 - 新增 MIME 组装、地址解析、服务器推导的离线单测（8 例）
 
 ---
+
 
 ## [1.0.0] — 2026-09-28
 

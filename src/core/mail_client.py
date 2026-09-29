@@ -413,6 +413,46 @@ class MailClient:
 
     # ---------- 按需取原文（供「保存附件」等离线功能调用） ----------
     @staticmethod
+    def mark_seen(account, password: str, folder: str, uids, seen: bool = True,
+                  timeout: float = _CONNECT_TIMEOUT) -> None:
+        """临时连接服务器，按 UID 批量设置/清除 \\Seen 标志（v1.7.0）。
+
+        必须非 readonly SELECT 才能改标志。uids 为字符串序列，按数值排序后
+        拼成 seq-set 一次发送（单封 STORE 由调用方成批，避免每封一连）。
+        folder 传用户可见名（内部做线格式转换）。失败抛异常，由调用方重试。
+        """
+        uids = sorted({str(u) for u in uids if str(u).isdigit()}, key=int)
+        if not uids:
+            return
+        if account.ssl:
+            conn = imaplib.IMAP4_SSL(account.imap_host, account.imap_port,
+                                     timeout=timeout)
+        else:
+            conn = imaplib.IMAP4(account.imap_host, account.imap_port,
+                                 timeout=timeout)
+        try:
+            conn.login(account.email, password)
+            MailClient._send_client_id(conn)
+            # STORE 要求可写会话：绝不能 readonly
+            typ, data = conn.select(folder_to_wire(folder), readonly=False)
+            # select() 对不存在的文件夹返回 ('NO', ...) 而不抛异常：
+            # 不在这里拦住，后面 STORE 只会报莫名的状态机错误，误导排查
+            if typ != "OK":
+                raise imaplib.IMAP4.error(
+                    f"SELECT {folder} 失败（文件夹可能已改名/删除/无权限）: {data}")
+            op = "+FLAGS.SILENT" if seen else "-FLAGS.SILENT"
+            seq = ",".join(uids)
+            typ, data = conn.uid("store", seq, f"({op} (\\Seen))")
+            if typ != "OK":
+                raise imaplib.IMAP4.error(
+                    f"STORE \\Seen 失败（folder={folder} uids={seq}）")
+        finally:
+            try:
+                conn.logout()
+            except Exception:
+                pass
+
+    @staticmethod
     def fetch_raw(account, password: str, folder: str, uid: str,
                   timeout: float = _CONNECT_TIMEOUT) -> bytes:
         """临时连接服务器，按 UID 取回邮件原文（BODY.PEEK[]，不打已读标记）。
