@@ -129,7 +129,9 @@ class MainWindow:
                          bd=0, bg=CARD, fg=TEXT, font=FONT_UI, width=22,
                          insertbackground=TEXT)
         entry.pack(side="left", padx=(0, 8), pady=5)
-        self._search_var.trace_add("write", lambda *_: self.refresh_mails())
+        # 搜索防抖：停顿 300ms 后才查库，避免每敲一个字符全表扫描
+        self._search_job = None
+        self._search_var.trace_add("write", self._on_search_changed)
 
     # ---------- 主体三栏 ----------
     def _build_panes(self):
@@ -184,6 +186,7 @@ class MainWindow:
         vsb.pack(side="right", fill="y")
         self.tree.bind("<Double-1>", self._on_mail_open)
         self.tree.bind("<Button-3>", self._mail_list_menu)
+        self.tree.bind("<Delete>", lambda e: self.delete_selected_mail())
         # 行样式：未读加粗着色 + 隔行底色
         self.tree.tag_configure("unread", font=FONT_UI_B, foreground=ACCENT_DARK)
         self.tree.tag_configure("odd", background=ROW_ALT)
@@ -244,6 +247,15 @@ class MainWindow:
                  pady=5).pack(fill="x")
 
     # ---------- 数据刷新 ----------
+    def _on_search_changed(self, *_):
+        if self._search_job is not None:
+            self.root.after_cancel(self._search_job)
+        self._search_job = self.root.after(300, self._search_fire)
+
+    def _search_fire(self):
+        self._search_job = None
+        self.refresh_mails()
+
     def refresh_accounts(self):
         """重建账户卡片列表（账户数通常很少，直接重建即可）。"""
         for frame, _ in self._account_rows:
@@ -362,7 +374,7 @@ class MainWindow:
         self.var_status.set(f"已复制{label}：{preview}")
 
     def _mail_list_menu(self, event):
-        """邮件列表右键：复制主题/发件人/邮箱地址/正文。"""
+        """邮件列表右键：复制主题/发件人/邮箱地址/正文 + 删除。"""
         row = self.tree.identify_row(event.y)
         if not row:
             return
@@ -382,7 +394,21 @@ class MainWindow:
         ):
             menu.add_command(label=label, state="normal" if val.strip() else "disabled",
                              command=lambda v=val, l=label[2:]: self._copy_to_clipboard(v, l))
+        menu.add_separator()
+        menu.add_command(label="删除（仅本地缓存）", command=self.delete_selected_mail)
         menu.tk_popup(event.x_root, event.y_root)
+        menu.grab_release()          # 现代 tkinter 通常自动释放，兜底
+        menu.destroy()               # 用完即毁，托盘长年运行不累积死控件
+
+    def delete_selected_mail(self):
+        """删除选中邮件的本地缓存（不动服务器上的邮件）。"""
+        sel = self.tree.selection()
+        if not sel:
+            return
+        db.delete_mail(int(sel[0]))
+        self.refresh_mails()
+        self.refresh_accounts()
+        self.var_status.set("已从本地缓存删除该邮件（服务器不受影响）")
 
     def _account_menu(self, account_id: str | None, event):
         """账户面板右键：复制邮箱地址/账户名。"""
@@ -395,6 +421,8 @@ class MainWindow:
         menu.add_command(label="复制邮箱地址", command=lambda: self._copy_to_clipboard(acc.email, "邮箱地址"))
         menu.add_command(label="复制账户名", command=lambda: self._copy_to_clipboard(acc.name, "账户名"))
         menu.tk_popup(event.x_root, event.y_root)
+        menu.grab_release()
+        menu.destroy()
 
     def _body_menu(self, event):
         """阅读区右键：复制选中 / 全选。"""
@@ -402,6 +430,8 @@ class MainWindow:
         menu.add_command(label="复制", command=self._copy_body_selection)
         menu.add_command(label="全选", command=lambda: self.txt_body.tag_add("sel", "1.0", "end"))
         menu.tk_popup(event.x_root, event.y_root)
+        menu.grab_release()
+        menu.destroy()
 
     def _copy_body_selection(self):
         try:
@@ -415,8 +445,9 @@ class MainWindow:
         for acc in self.manager.enabled():
             client = self.scheduler.client(acc.id)
             if client is not None and not client.stopped:
+                client.wake()   # 真正打断 IDLE 等待/轮询睡眠，立即抓一次
                 n += 1
-        self.var_status.set(f"已请求 {n} 个账户收信（推送账户将在数秒内更新）")
+        self.var_status.set(f"已请求 {n} 个账户立即收信")
 
     def mark_all_read(self):
         db.mark_all_read(self._filter_account)

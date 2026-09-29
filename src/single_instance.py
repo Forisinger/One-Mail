@@ -35,6 +35,9 @@ def acquire() -> bool:
     """
     global _mutex_handle
     _mutex_handle = _k32.CreateMutexW(None, False, _MUTEX_NAME)
+    if not _mutex_handle:
+        # 句柄为 NULL = 互斥体创建失败（权限等），绝不假阳性地放行双开
+        return False
     return ctypes.get_last_error() != _ERROR_ALREADY_EXISTS
 
 

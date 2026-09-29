@@ -204,6 +204,11 @@ class ComposeWindow:
         if not color or not color[1]:
             return
         hexc = color[1]
+        # 先清掉选区内已有颜色标签：同一字符挂多个颜色时导出结果取决于
+        # 标签优先级，不可预测；且残留的 color-* 标签会无限累积
+        for t in self.txt_body.tag_names(sel[0]):
+            if t.startswith(richtext.COLOR_PREFIX):
+                self.txt_body.tag_remove(t, sel[0], sel[1])
         tag = richtext.COLOR_PREFIX + hexc
         self.txt_body.tag_configure(tag, foreground=hexc)
         self.txt_body.tag_add(tag, sel[0], sel[1])
@@ -275,6 +280,8 @@ class ComposeWindow:
         self._sending = True
         self.btn_send.configure(state="disabled")
         self.var_status.set("正在发送…")
+        # 发送中关窗会丢发送结果回调：先提示确认
+        self.win.protocol("WM_DELETE_WINDOW", self._on_close)
 
         def _work():
             ok, err = False, ""
@@ -291,6 +298,8 @@ class ComposeWindow:
         threading.Thread(target=_work, name="onemail-send", daemon=True).start()
 
     def _on_sent(self, ok: bool, err: str):
+        if not self.win.winfo_exists():
+            return  # 用户已关闭窗口：控件不可再触碰
         self._sending = False
         self.btn_send.configure(state="normal")
         if ok:
@@ -303,3 +312,10 @@ class ComposeWindow:
                 "一邮通",
                 f"发送失败：{err}\n\n常见原因：授权码错误、未开启 SMTP 服务、"
                 f"附件过大或网络中断。", parent=self.win)
+
+    def _on_close(self):
+        if self._sending and not messagebox.askyesno(
+                "一邮通", "邮件正在发送，关闭窗口后发送仍会继续但看不到结果。确定关闭？",
+                parent=self.win):
+            return
+        self.win.destroy()

@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import imaplib
 import re
+import select
 import socket
 import threading
 import time
@@ -20,8 +21,10 @@ from .parser import parse_raw
 
 _IMAP4_PORT_SSL = 993
 _IDLE_REFRESH = 24 * 60          # IDLE 保活周期（秒）
+_SELECT_SLICE = 2                # IDLE 等待分片（秒）：唤醒/停止的最大延迟
 _RECONNECT_BASE = 5              # 重连退避起点（秒）
 _RECONNECT_MAX = 10 * 60
+_CONNECT_TIMEOUT = 15            # IMAP 建连超时（秒），含 list_folders
 
 # 从 IDLE 未请求响应里抓邮箱状态行（如 * 23 EXISTS）
 _EXISTS_RE = re.compile(rb"\*\s+(\d+)\s+EXISTS", re.IGNORECASE)
@@ -44,19 +47,37 @@ class MailClient:
         self._on_new_mail = on_new_mail
         self._on_status = on_status
         self._stop = threading.Event()
+        self._wake = threading.Event()   # 「立即收信」唤醒信号
         self._thread: threading.Thread | None = None
-        self._last_seen_exists = 0   # IDLE 收信的基准邮箱总数
+        self._conn: imaplib.IMAP4 | None = None   # 供 stop() 关 socket 打断阻塞
 
     # ---------- 生命周期 ----------
     def start(self):
         self._stop.clear()
+        self._wake.clear()
         self._thread = threading.Thread(
             target=self._run_loop, name=f"mail-{self.account.email}", daemon=True
         )
         self._thread.start()
 
     def stop(self):
+        """请求停止。收信线程可能阻塞在 read 上，直接关 socket 让它立刻退出。"""
         self._stop.set()
+        self._wake.set()
+        conn = self._conn
+        if conn is not None:
+            try:
+                conn.sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                conn.sock.close()
+            except OSError:
+                pass
+
+    def wake(self):
+        """请求立即收信一次（打断 IDLE 等待/轮询睡眠）。"""
+        self._wake.set()
 
     @property
     def stopped(self) -> bool:
@@ -69,6 +90,7 @@ class MailClient:
             conn = None
             try:
                 conn = self._connect()
+                self._conn = conn
                 self._status("已连接")
                 backoff = _RECONNECT_BASE
                 if self._probe_idle(conn):
@@ -82,6 +104,7 @@ class MailClient:
                 self._status("未知错误，稍后重连")
                 traceback.print_exc()
             finally:
+                self._conn = None
                 if conn is not None:
                     try:
                         conn.logout()
@@ -96,9 +119,11 @@ class MailClient:
     def _connect(self) -> imaplib.IMAP4:
         acc = self.account
         if acc.ssl:
-            conn = imaplib.IMAP4_SSL(acc.imap_host, acc.imap_port)
+            conn = imaplib.IMAP4_SSL(acc.imap_host, acc.imap_port,
+                                     timeout=_CONNECT_TIMEOUT)
         else:
-            conn = imaplib.IMAP4(acc.imap_host, acc.imap_port)
+            conn = imaplib.IMAP4(acc.imap_host, acc.imap_port,
+                                 timeout=_CONNECT_TIMEOUT)
         conn.login(acc.email, self.password)
         self._send_client_id(conn)      # 163/126：必须上报客户端 ID
         conn.select(self._folder(), readonly=True)
@@ -138,10 +163,9 @@ class MailClient:
 
     # ---------- IDLE 推送模式 ----------
     def _idle_loop(self, conn):
-        typ, data = conn.select(self._folder(), readonly=True)
+        typ, _data = conn.select(self._folder(), readonly=True)
         if typ != "OK":
             raise imaplib.IMAP4.error(f"SELECT {self._folder()} failed")
-        self._last_seen_exists = int(data[0] or b"0")
         # 启动即全量对账一次（补收离线期间的邮件）
         self._fetch_new(conn)
 
@@ -157,10 +181,19 @@ class MailClient:
                     f"连接已被服务器关闭(state={conn.state})")
             if got_event:
                 self._status("收到新邮件推送")
+            elif self._wake.was_set():
+                self._status("手动收信")
+            self._wake.clear()
             self._fetch_new(conn)
 
     def _idle_wait(self, conn, timeout: float) -> bool:
-        """进入 IDLE 等待。返回 True 表示服务器推送了 EXISTS（可能有新邮件）。"""
+        """进入 IDLE 等待。返回 True 表示服务器推送了 EXISTS（可能有新邮件）。
+
+        用 select.select 分片等待，**绝不**对 socket settimeout——imaplib 的
+        文件对象一旦发生超时就被永久污染（SocketIO._timeout_occurred），
+        之后任何 read 都会抛 OSError，导致每个保活周期必然断线重连。
+        分片同时检查 _stop/_wake，停止与「立即收信」即时生效（≤2s）。
+        """
         tag = conn._new_tag().decode()
         conn.send(f"{tag} IDLE\r\n".encode())
         resp = conn.readline()
@@ -170,41 +203,42 @@ class MailClient:
             return False
 
         got_exists = False
-        conn.sock.settimeout(timeout)
         deadline = time.monotonic() + timeout
+        while not self._stop.is_set() and not self._wake.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break                    # 保活周期到 -> DONE 后重发 IDLE
+            r, _, _ = select.select([conn.sock], [], [], min(_SELECT_SLICE, remaining))
+            if not r:
+                continue                 # 分片超时，继续检查 stop/wake
+            line = conn.readline()
+            if not line:
+                raise imaplib.IMAP4.abort("IDLE 空响应")
+            if b"BYE" in line.upper():
+                raise imaplib.IMAP4.abort("服务器 BYE")
+            if _EXISTS_RE.search(line):
+                got_exists = True
+                break
+        # DONE 交互（stop 已关 socket 时这里的 read 会立即抛错退出）
         try:
-            while time.monotonic() < deadline and not self._stop.is_set():
-                line = conn.readline()          # 阻塞直到有推送/超时
+            conn.send(b"DONE\r\n")
+            # 读掉 tagged 结束响应，防止缓冲区残留
+            end = time.monotonic() + 5
+            while time.monotonic() < end and not self._stop.is_set():
+                line = conn.readline()
                 if not line:
-                    raise imaplib.IMAP4.abort("IDLE 空响应")
-                if b"BYE" in line.upper():
-                    raise imaplib.IMAP4.abort("服务器 BYE")
-                if _EXISTS_RE.search(line):
-                    got_exists = True
+                    raise imaplib.IMAP4.abort("IDLE DONE 后连接断开")
+                upper = line.upper()
+                if line.decode("ascii", "ignore").startswith(tag):
+                    if b"BAD" in upper or b"NO" in upper:
+                        raise imaplib.IMAP4.abort(f"IDLE DONE 被拒绝: {line!r}")
                     break
-        except socket.timeout:
-            pass                                 # 正常超时 -> 重发 IDLE
-        finally:
-            conn.sock.settimeout(None)
-            try:
-                conn.send(b"DONE\r\n")
-                # 读掉 tagged 结束响应，防止缓冲区残留
-                end = time.monotonic() + 5
-                while time.monotonic() < end:
-                    line = conn.readline()
-                    if not line:
-                        raise imaplib.IMAP4.abort("IDLE DONE 后连接断开")
-                    upper = line.upper()
-                    if line.decode("ascii", "ignore").startswith(tag):
-                        if b"BAD" in upper or b"NO" in upper:
-                            raise imaplib.IMAP4.abort(f"IDLE DONE 被拒绝: {line!r}")
-                        break
-                    if b"BYE" in upper:
-                        raise imaplib.IMAP4.abort("服务器 BYE")
-            except (imaplib.IMAP4.abort, imaplib.IMAP4.error):
-                raise
-            except Exception:
-                raise imaplib.IMAP4.abort("IDLE DONE 交互失败")
+                if b"BYE" in upper:
+                    raise imaplib.IMAP4.abort("服务器 BYE")
+        except (imaplib.IMAP4.abort, imaplib.IMAP4.error):
+            raise
+        except Exception:
+            raise imaplib.IMAP4.abort("IDLE DONE 交互失败")
         return got_exists
 
     # ---------- 轮询模式 ----------
@@ -212,8 +246,13 @@ class MailClient:
         interval = self.account.poll_interval
         while not self._stop.is_set():
             self._fetch_new(conn)
-            if self._stop.wait(interval):
+            # 睡满一个周期，或被 wake/stop 提前唤醒
+            woken = self._wake.wait(interval)
+            self._wake.clear()
+            if self._stop.is_set():
                 break
+            if woken:
+                self._status("手动收信")
             if conn.state == "LOGOUT":
                 raise imaplib.IMAP4.abort("服务器已关闭连接")
             conn.select(self._folder(), readonly=True)  # 轮询前刷新连接状态
@@ -232,8 +271,9 @@ class MailClient:
             if self._stop.is_set():
                 break
             typ, msgdata = conn.uid("fetch", uid, "(BODY.PEEK[])")
-            if typ != "OK" or not msgdata or not msgdata[0]:
-                continue
+            if (typ != "OK" or not msgdata or not msgdata[0]
+                    or not isinstance(msgdata[0], tuple)):
+                continue  # 个别服务器对失效 UID 返回纯文本 OK 行，跳过
             raw = msgdata[0][1]
             parsed = parse_raw(raw)
             parsed_uid = uid.decode()
@@ -264,9 +304,11 @@ class MailClient:
         供「获取文件夹列表」按钮使用；任何失败都以异常抛出，由调用方提示。
         """
         if account.ssl:
-            conn = imaplib.IMAP4_SSL(account.imap_host, account.imap_port)
+            conn = imaplib.IMAP4_SSL(account.imap_host, account.imap_port,
+                                     timeout=_CONNECT_TIMEOUT)
         else:
-            conn = imaplib.IMAP4(account.imap_host, account.imap_port)
+            conn = imaplib.IMAP4(account.imap_host, account.imap_port,
+                                 timeout=_CONNECT_TIMEOUT)
         try:
             conn.login(account.email, password)
             _send_client_id(conn)

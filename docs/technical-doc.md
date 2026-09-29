@@ -187,7 +187,15 @@ CREATE INDEX idx_mails_account ON mails(account_id, received_at DESC);
 - **Folder listing**: the account dialog's 获取 (Fetch) button runs `LIST "" "*"` on a worker thread, parses `(flags) delim name` lines, skips `\Noselect`, and decodes **IMAP modified UTF-7** (`&XfJT0ZAB-` → 已发送) so Chinese folder names display correctly
 - **Connection-management fix**: `database.py` now uses a contextmanager that commits **and closes** each connection (the old `with sqlite3.connect()` only managed the transaction — the db file handle stayed open forever on Windows)
 
-### 11. Footprint guarantees
+### 12. Hardening (v1.4.0, from a multi-agent audit)
+- **No silent data loss**: config.json / secrets.bin written atomically (temp + `os.replace`); corrupt config backed up as `*.corrupt`; corrupt password store aborts the save instead of wiping everything
+- **Concurrency**: IDLE wait uses `select.select` slices (never `settimeout` on the socket — imaplib's file object is permanently poisoned after a timeout, causing a reconnect every keep-alive cycle); `stop()` closes the socket for instant worker termination; 「立即收信」 fetch-now wakes workers via an event; `_poll_events` is exception-guarded so the event chain can never silently die
+- **Parsing**: unclosed `<script>/<style>` (CDATA mode emits no events at all) is recovered from the parser buffer at the first real markup tag — broken marketing mail no longer yields empty bodies
+- **Matching**: `%`/`_` escaped in LIKE (`ESCAPE '\'`); `guess_host` uses exact/suffix-with-dot matching so `myqq.com` can't send credentials to `imap.qq.com`
+- **UI**: account editing keeps the stored auth code when the password field is left empty; richtext walks Tcl indices (emoji-safe); dialog worker threads never touch tk variables; context menus destroyed after popup; confirm dialog when closing during send
+- **Misc**: 15 s IMAP connect timeout everywhere; local delete (right-click/Delete, server untouched); outbound mail gets `Date`/`Message-ID`; 300 ms search debounce; save_to_sent decodes modified-UTF-7 folder names (163 已发送 sync finally works); single-instance treats a NULL mutex handle as failure; migration is idempotent (`DROP TABLE IF EXISTS mails_new` + `BEGIN IMMEDIATE` + missing-column fallbacks)
+
+### 13. Footprint guarantees
 - No Electron/Qt/browser engine — tkinter is the whole UI
 - IDLE blocks on the socket = 0% idle CPU; polling accounts wake briefly per interval
 - Body text truncated to 64 KB on ingest to bound DB growth
@@ -211,6 +219,7 @@ Build: `pyinstaller build.spec --noconfirm` → `dist/OneMail.exe`.
 1. **Parser unit tests**: GBK headers, nested MIME, HTML stripping, attachment detection, garbage-input robustness — all passing
 2. **Smoke tests**: DB insert/dedup/unread counts, DPAPI round-trip (incl. non-ASCII auth codes), badge rendering 0/99+/100
 3. **Search/migration unit tests** (test_search.py, offline): old-schema migration, folder isolation & dedup, body/subject/sender keyword hits, unread+attachment+account filter composition, mUTF-7 decoding
-4. **SMTP unit tests** (test_smtp.py, offline): MIME header encoding, multi-recipient parsing, ASCII/Chinese attachment filenames (RFC 2231), SMTP host derivation — all passing
-5. **Live test**: real NetEase 163 mailbox — connect, auto-poll fallback, fetch with source label, end-to-end OK
-6. **Packaged exe**: boots to tray, connects, fetches, no stderr output
+4. **Hardening regression tests** (test_robustness.py, offline): LIKE escaping, config atomicity + corrupt backup, unclosed script/style body recovery, migration idempotency, SMTP Date/Message-ID, domain-boundary matching, local delete
+5. **SMTP unit tests** (test_smtp.py, offline): MIME header encoding, multi-recipient parsing, ASCII/Chinese attachment filenames (RFC 2231), SMTP host derivation — all passing
+6. **Live test**: real NetEase 163 mailbox — connect, auto-poll fallback, fetch with source label, end-to-end OK
+7. **Packaged exe**: boots to tray, connects, fetches, no stderr output

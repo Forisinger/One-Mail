@@ -31,6 +31,11 @@ def load() -> dict:
             with open(_CONFIG, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except Exception:
+            # 损坏的配置先备份留证，再回默认——绝不静默丢弃用户数据
+            try:
+                os.replace(_CONFIG, _CONFIG + ".corrupt")
+            except OSError:
+                pass
             return json.loads(json.dumps(_DEFAULT))
     # 补齐缺失键
     for k, v in _DEFAULT["settings"].items():
@@ -39,6 +44,9 @@ def load() -> dict:
 
 
 def save(data: dict) -> None:
+    """原子写：先写临时文件再 os.replace，进程中断也不会留下半个 JSON。"""
+    tmp = _CONFIG + ".tmp"
     with _LOCK:
-        with open(_CONFIG, "w", encoding="utf-8") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, _CONFIG)

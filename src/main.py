@@ -11,6 +11,7 @@ from __future__ import annotations
 import queue
 import sys
 import os
+import traceback
 from datetime import datetime
 
 # 允许 python src/main.py 与打包 exe 两种运行方式
@@ -80,6 +81,17 @@ class App:
 
     # ---------- 事件循环（UI 线程 500ms 轮询，开销可忽略） ----------
     def _poll_events(self):
+        # 防护：任何处理器异常都不能切断 after 链——否则收信事件与托盘
+        # 命令永久失联（程序"活着但失聪"），且毫无可见征兆
+        try:
+            self._drain_events()
+        except Exception as e:
+            self._log(f"事件处理异常: {e!r}")
+            traceback.print_exc()
+        finally:
+            self.root.after(500, self._poll_events)
+
+    def _drain_events(self):
         # 1) 收信引擎事件
         while True:
             try:
@@ -99,7 +111,6 @@ class App:
             except queue.Empty:
                 break
             self._handle_command(cmd["cmd"])
-        self.root.after(500, self._poll_events)
 
     @staticmethod
     def _log(msg: str):

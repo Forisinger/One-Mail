@@ -8,6 +8,62 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versio
 
 ---
 
+## [1.4.0] — 2026-09-29
+
+Hardening release from a three-way multi-agent code audit: data-loss prevention, concurrency fixes, and UI robustness. · 基于三路多 Agent 代码审查的加固版本：防丢数据、并发修复与 UI 健壮性。
+
+### Fixed · 修复
+
+**English**
+
+- **No more silent data loss** (audit P0): `config.json` and `secrets.bin` are now written atomically (temp file + `os.replace`); a corrupt config is backed up as `*.corrupt` instead of being silently replaced by defaults; a corrupt password store aborts the save instead of wiping all other passwords
+- **「立即收信」 actually works now**: the button previously did nothing at all — `MailClient` gained a wake event that interrupts the IDLE wait / polling sleep and fetches immediately (also wired to the tray command)
+- **IDLE no longer reconnects every 24 minutes**: waiting now uses `select.select` slices instead of a 24-min socket timeout; `imaplib`'s file object was permanently poisoned by the first timeout (`SocketIO._timeout_occurred`), so every keep-alive cycle used to abort and re-login (triggering provider rate limits)
+- **stop() closes the socket**: account edit/remove/pause now terminates the old worker immediately instead of leaving it blocked in a read for up to 24 minutes with two connections fetching the same mailbox
+- **Unclosed `<script>`/`<style>` no longer swallows the whole body**: HTML is CDATA-scanned, so broken marketing mail could produce empty bodies; parsing now recovers at the first real markup and re-parses the remainder
+- **`search_mails` escapes `%`/`_`** (`ESCAPE '\'`) — searching `100%` no longer prefix-matches everything; count + rows now run in one connection (no racy totals)
+- **`guess_host` domain boundary**: `user@myqq.com` / `user@x163.com` no longer resolve to `imap.qq.com` / `imap.163.com` — credentials could be sent to the wrong server
+- **Edit-account no longer demands re-typing the auth code**: leave the password field empty to keep the stored one (still required for new accounts)
+- **Emoji no longer corrupt rich text**: HTML export and formatting now walk Tcl indices (UTF-16 code units) instead of Python code points, so styling after astral chars stays aligned
+- **Save-to-sent on 163/126 fixed**: folder names from `LIST` are modified-UTF-7 (`&XfJT0ZAB-`) and were never matched before; now decoded and the real folder name is APPENDed
+- **Event loop can no longer go deaf**: `_poll_events` is exception-guarded and always re-arms its `after` — a single handler exception previously killed all mail/tray events permanently
+- **Composing**: closing during send asks for confirmation and the completion callback tolerates a destroyed window; picking a color first clears existing color tags (no stacking/unpredictable output)
+- **Single-instance false positive fixed**: a NULL mutex handle (creation failure) is no longer treated as "first instance"
+- **Migration hardening**: half-completed upgrades (stale `mails_new` table) and older schemas with missing columns now recover instead of crashing at every startup
+- **Right-click menus are destroyed after popup** (long-running tray apps accumulated dead menu widgets); IMAP connections get a 15 s timeout; malformed FETCH replies are skipped
+
+**中文**
+
+- **不再静默丢数据**（审查 P0）：`config.json` 与 `secrets.bin` 改为原子写（临时文件 + `os.replace`）；配置损坏时先备份为 `*.corrupt` 再回默认，绝不用空配置覆盖原始数据；密码库损坏时中止保存而非清空其他所有密码
+- **「立即收信」真的生效了**：此前按钮是空操作——MailClient 增加唤醒事件，打断 IDLE 等待/轮询睡眠立即抓信（托盘命令同样生效）
+- **IDLE 不再每 24 分钟断线重连**：等待改用 `select.select` 分片，不再对 socket 设 24 分钟超时——imaplib 的文件对象一旦超时就被永久污染（`SocketIO._timeout_occurred`），导致每个保活周期必然报错重登（触发服务商频控）
+- **stop() 直接关闭 socket**：编辑/删除/暂停账户后旧线程立刻退出，不再阻塞在 read 上最长 24 分钟、两条连接同时拉同一邮箱
+- **未闭合 `<script>/<style>` 不再吞掉整封正文**：此类 HTML 处于 CDATA 模式，坏邮件正文可能整个为空；现在从第一处真实标记恢复并重新解析剩余部分
+- **`search_mails` 转义 `%`/`_`**（`ESCAPE '\'`）——搜「100%」不再前缀匹配所有邮件；计数与取行同一连接完成（消除竞态）
+- **`guess_host` 域名边界**：`user@myqq.com` / `user@x163.com` 不再命中 `imap.qq.com` / `imap.163.com`——授权码可能被发给错误服务器
+- **编辑账户不再强制重输授权码**：密码留空即沿用已存授权码（新增账户仍必填）
+- **emoji 不再打乱富文本**：HTML 导出与格式化改按 Tcl 索引（UTF-16 代码单元）推进，星形平面字符之后的样式不再错位
+- **163/126 已发送同步修复**：`LIST` 返回的文件夹名是修改版 UTF-7（`&XfJT0ZAB-`），此前永远匹配不上；现在解码后用真实文件夹名 APPEND
+- **事件循环不再「失聪」**：`_poll_events` 加异常防护并始终重挂 `after`——此前一次处理器异常就会永久断掉全部收信/托盘事件
+- **写信窗口**：发送中关窗先确认，完成回调容忍窗口已销毁；取色先清除已有颜色标签（不再叠加导致导出不可预测）
+- **单实例假阳性修复**：互斥体创建失败（句柄为 NULL）不再被当成「首个实例」
+- **迁移加固**：升级中断留下的 `mails_new` 残表、缺列的更老库，都能恢复而非每次启动崩溃
+- **右键菜单弹出后销毁**（长年运行的托盘应用不再累积死控件）；IMAP 连接统一 15 秒超时；跳过畸形 FETCH 应答
+
+### Changed · 变更
+
+**English**
+
+- New features: **local delete** (mail list right-click / Delete key, server untouched); search debounced 300 ms; sent mail gets `Date`/`Message-ID` headers
+- Unit suite grows to 43 cases (new `tests/test_robustness.py`: LIKE escaping, config atomicity, parser recovery, migration idempotency, SMTP headers, domain boundaries)
+
+**中文**
+
+- 新增功能：**本地删除邮件**（邮件列表右键 / Delete 键，不动服务器）；搜索 300ms 防抖；发出的邮件补齐 `Date`/`Message-ID` 头
+- 单测增至 43 例（新增 `tests/test_robustness.py`：LIKE 转义、配置原子性、解析器恢复、迁移幂等、SMTP 头、域名边界）
+
+---
+
 ## [1.3.0] — 2026-09-29
 
 Full-text search with filters, and per-account receive-folder selection. · 全文搜索与过滤，账户级收信文件夹选择。

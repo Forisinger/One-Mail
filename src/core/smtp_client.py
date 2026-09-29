@@ -11,15 +11,17 @@ from __future__ import annotations
 import imaplib
 import mimetypes
 import os
+import re
 import smtplib
 from email.header import Header
 from email.message import Message
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.utils import formataddr
+from email.utils import formataddr, formatdate, make_msgid
 
 from .account import Account
+from .mail_client import _decode_mutf7
 
 # 已发送文件夹的常见命名（按顺序探测）
 SENT_FOLDER_CANDIDATES = ("已发送", "Sent Messages", "Sent", "Sent Items")
@@ -74,6 +76,9 @@ def build_mime(account: Account, to_addrs: list[str], subject: str,
     if bcc_addrs:
         msg["Bcc"] = ", ".join(bcc_addrs)
     msg["Subject"] = Header(subject or "(无主题)", "utf-8")
+    # Date/Message-ID：smtplib 与 email 库都不会自动补；缺失影响送达率与回复串接
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain=account.email.rsplit("@", 1)[-1] or "localhost")
     return msg
 
 
@@ -109,21 +114,24 @@ def save_to_sent(account: Account, password: str, msg: Message,
             conn = imaplib.IMAP4(account.imap_host, account.imap_port, timeout=timeout)
         try:
             conn.login(account.email, password)
+            typ, boxes = conn.list()
+            if typ != "OK":
+                return False
             folder = None
-            for cand in SENT_FOLDER_CANDIDATES:
-                typ, boxes = conn.list()
-                if typ != "OK":
-                    break
-                for raw in boxes or []:
-                    try:
-                        name = raw.decode("utf-8", "ignore").rsplit("/", 1)[-1]
-                        name = name.strip().strip('"').split("/")[-1].strip('"')
-                        if name == cand or raw.decode("utf-8", "ignore").find(cand) >= 0:
-                            folder = cand
-                            break
-                    except Exception:
-                        continue
-                if folder:
+            for raw in boxes or []:
+                line = raw if isinstance(raw, bytes) else str(raw).encode("utf-8", "ignore")
+                m = re.match(rb'\(([^)]*)\)\s+"?([^"]*)"?\s+(.+)', line.strip())
+                if not m:
+                    continue
+                name = m.group(3).strip()
+                if name.startswith(b'"') and name.endswith(b'"') and len(name) >= 2:
+                    name = name[1:-1]
+                # 服务器返回的中文文件夹名是 IMAP 修改版 UTF-7（&XfJT0ZAB-），
+                # 必须解码后再与候选名比对；APPEND 也要用解码后的名字
+                decoded = _decode_mutf7(name.decode("ascii", "ignore"))
+                tail = decoded.rsplit("/", 1)[-1]
+                if tail in SENT_FOLDER_CANDIDATES:
+                    folder = decoded
                     break
             if not folder:
                 return False

@@ -33,31 +33,76 @@ class ParsedMail:
 
 
 class _HTML2Text(HTMLParser):
-    """极简 HTML -> 纯文本转换器。"""
+    """极简 HTML -> 纯文本转换器。
+
+    skip 标签按「进入时记住标签名」处理而非纯计数：真实邮件常有不闭合的
+    <script>/<style>（营销邮件、被转发截断的邮件）。跳过区内一旦出现
+    真实排版标记（<body>/<div>/<p> 等），即认定标签未闭合并从该处恢复
+    解析，避免整封正文被吞。
+    """
     _SKIP = {"script", "style", "head", "title"}
+    _MAX_SKIP_DATA = 256 * 1024   # 跳过区内数据超限视为未闭合，强制恢复
+    # script/style 源码里偶见 "<p>" 之类字符串；这里宁可多恢复也不吞正文
+    _RESUME_RE = re.compile(
+        r"<\s*/?\s*(body|div|p|br|table|tr|td|th|h[1-6]|font|span|a)\b", re.I)
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self._chunks: list[str] = []
-        self._skip_depth = 0
+        self._skip_stack: list[str] = []
+        self._skip_bytes = 0
 
     def handle_starttag(self, tag, attrs):
         if tag in self._SKIP:
-            self._skip_depth += 1
-        elif tag in ("br", "p", "div", "tr", "li"):
+            self._skip_stack.append(tag)
+            self._skip_bytes = 0
+        elif tag in ("br", "p", "div", "tr", "li") and not self._skip_stack:
             self._chunks.append("\n")
 
     def handle_endtag(self, tag):
-        if tag in self._SKIP and self._skip_depth > 0:
-            self._skip_depth -= 1
-        elif tag in ("p", "div", "tr"):
+        if self._skip_stack:
+            if tag == self._skip_stack[-1]:
+                self._skip_stack.pop()
+                self._skip_bytes = 0
+            return
+        if tag in ("p", "div", "tr"):
             self._chunks.append("\n")
 
     def handle_data(self, data):
-        if self._skip_depth == 0 and data.strip():
-            self._chunks.append(data)
+        if not self._skip_stack:
+            if data.strip():
+                self._chunks.append(data)
+            return
+        self._skip_bytes += len(data)
+        if self._skip_bytes > self._MAX_SKIP_DATA:
+            self._skip_stack.clear()   # 超限兜底恢复
+            return
+        m = self._RESUME_RE.search(data)
+        if not m:
+            return
+        # 未闭合的 script/style：从第一处真实标记恢复，用子解析器处理剩余部分
+        self._skip_stack.clear()
+        sub = _HTML2Text()
+        sub.feed(data[m.start():])
+        text = sub.text()
+        if text:
+            self._chunks.append(text)
 
     def text(self) -> str:
+        # CDATA 模式（script/style）下未闭合的标签会让剩余输入永远停在
+        # 缓冲区、不产生任何事件——在这里取回缓冲内容做恢复解析
+        if self._skip_stack and self.rawdata:
+            raw = self.rawdata
+            self.rawdata = ""
+            self._skip_stack.clear()
+            m = self._RESUME_RE.search(raw)
+            if m:
+                sub = _HTML2Text()
+                sub.feed(raw[m.start():])
+                sub.close()
+                text = sub.text()
+                if text:
+                    self._chunks.append(text)
         raw = "".join(self._chunks)
         return re.sub(r"\n{3,}", "\n\n", raw).strip()
 

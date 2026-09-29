@@ -60,13 +60,19 @@ def _close_spans(b: bool, i: bool, u: bool, color: str | None) -> str:
 
 
 def text_to_html(widget: tk.Text) -> str:
-    """将 Text 控件内容（含样式标签）导出为 HTML 片段。"""
+    """将 Text 控件内容（含样式标签）导出为 HTML 片段。
+
+    字符一律从 Tcl 侧取（widget.get(idx)）而不是迭代 Python 字符串：
+    Tcl 索引按 UTF-16 代码单元推进，emoji 等星形平面字符占 2 个单位，
+    用 Python 码点迭代会导致其后所有字符的样式索引错位。
+    """
     out: list[str] = []
     prev = (False, False, False, None)
     has_style = False
     text = widget.get("1.0", "end-1c")
     idx = "1.0"
-    for ch in text:
+    while widget.compare(idx, "<", "end-1c"):
+        ch = widget.get(idx)
         b, i, u, color = char_flags(widget, idx)
         cur = (b, i, u, color)
         if cur != prev:

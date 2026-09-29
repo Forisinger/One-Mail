@@ -44,7 +44,9 @@ class Account:
     def guess_host(email_addr: str) -> tuple[str, int]:
         domain = email_addr.rsplit("@", 1)[-1].lower()
         for d, (host, port) in KNOWN_HOSTS.items():
-            if domain.endswith(d):
+            # 边界匹配：myqq.com / x163.com 不能命中 qq.com/163.com，
+            # 否则授权码会被发给错误的服务器
+            if domain == d or domain.endswith("." + d):
                 return host, port
         return ("imap." + domain if domain else "", 993)
 

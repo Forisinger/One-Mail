@@ -38,7 +38,9 @@ CREATE INDEX IF NOT EXISTS idx_mails_unread ON mails(is_read);
 def _migrate(conn: sqlite3.Connection) -> None:
     """旧库升级：v1.2 及之前的 mails 表无 folder 列且唯一键为 (account_id, uid)。
 
-    策略：建新表 -> 拷贝数据（folder 记为 INBOX）-> 删旧表 -> 改名，单事务原子完成。
+    策略：建新表 -> 拷贝数据（folder 记为 INBOX）-> 删旧表 -> 改名。
+    脚本开头 DROP 旧的新表保证幂等；显式 BEGIN IMMEDIATE 包住全程，
+    防止 executescript 逐句提交留下半迁移状态。
     """
     exists = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='mails'").fetchone()
@@ -47,7 +49,19 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(mails)")}
     if "folder" in cols:
         return
-    conn.executescript("""
+    # 兼容更老的库：缺列时用默认值填充，避免 SELECT 直接失败
+    fetched_at = "fetched_at" if "fetched_at" in cols else "''"
+    has_attach = "has_attachment" if "has_attachment" in cols else "0"
+    is_read = "is_read" if "is_read" in cols else "0"
+    message_id = "message_id" if "message_id" in cols else "''"
+    from_addr = "from_addr" if "from_addr" in cols else "''"
+    from_name = "from_name" if "from_name" in cols else "''"
+    subject = "subject" if "subject" in cols else "''"
+    body_text = "body_text" if "body_text" in cols else "''"
+    received_at = "received_at" if "received_at" in cols else "''"
+    conn.executescript(f"""
+        BEGIN IMMEDIATE;
+        DROP TABLE IF EXISTS mails_new;
         CREATE TABLE mails_new (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             account_id TEXT NOT NULL,
@@ -67,13 +81,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
         INSERT OR IGNORE INTO mails_new
             (id, account_id, uid, folder, message_id, from_addr, from_name,
              subject, body_text, has_attachment, received_at, fetched_at, is_read)
-        SELECT id, account_id, uid, 'INBOX', message_id, from_addr, from_name,
-               subject, body_text, has_attachment, received_at, fetched_at, is_read
+        SELECT id, account_id, uid, 'INBOX', {message_id}, {from_addr}, {from_name},
+               {subject}, {body_text}, {has_attach}, {received_at}, {fetched_at}, {is_read}
         FROM mails;
         DROP TABLE mails;
         ALTER TABLE mails_new RENAME TO mails;
         CREATE INDEX IF NOT EXISTS idx_mails_account ON mails(account_id, received_at DESC);
         CREATE INDEX IF NOT EXISTS idx_mails_unread ON mails(is_read);
+        COMMIT;
     """)
 
 
@@ -105,6 +120,8 @@ def insert_mails(account_id: str, mails: list[dict],
     new: list[dict] = []
     with _LOCK, _conn() as conn:
         for m in mails:
+            if not m.get("uid"):
+                continue  # 无 UID 的异常批次不入库，避免炸掉整批
             cur = conn.execute(
                 """INSERT OR IGNORE INTO mails
                    (account_id, uid, folder, message_id, from_addr, from_name, subject,
@@ -135,49 +152,56 @@ def list_mails(account_id: str | None = None, limit: int = 200) -> list[sqlite3.
         return conn.execute(sql, args).fetchall()
 
 
+def _escape_like(kw: str) -> str:
+    """LIKE 通配符转义：搜「100%」「a_b」时按字面匹配。"""
+    return kw.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def search_mails(account_id: str | None = None, keyword: str = "",
                  unread_only: bool = False, has_attach: bool = False,
                  limit: int = 500) -> tuple[list[sqlite3.Row], int]:
     """组合搜索：账户筛选 + 关键字（主题/发件人/正文）+ 未读/附件过滤。
 
     返回 (结果行, 未筛选前总数)：总数用于状态栏显示「共 N 封（筛选后 M）」。
+    两条查询在同一连接内完成，避免中途写入导致数字不一致。
     """
-    base_sql = "SELECT COUNT(*) c FROM mails"
-    base_args: tuple = ()
-    if account_id:
-        base_sql += " WHERE account_id = ?"
-        base_args = (account_id,)
-    with _LOCK, _conn() as conn:
-        total = conn.execute(base_sql, base_args).fetchone()["c"]
-
     sql = "SELECT * FROM mails"
     conds: list[str] = []
     args: list = []
     if account_id:
         conds.append("account_id = ?")
         args.append(account_id)
+    base_args = tuple(args)   # 账户筛选：total 只按账户计
     kw = keyword.strip()
     if kw:
-        like = f"%{kw}%"
-        conds.append("(subject LIKE ? OR from_name LIKE ? OR from_addr LIKE ?"
-                     " OR body_text LIKE ?)")
+        like = f"%{_escape_like(kw)}%"
+        conds.append("(subject LIKE ? ESCAPE '\\' OR from_name LIKE ? ESCAPE '\\'"
+                     " OR from_addr LIKE ? ESCAPE '\\' OR body_text LIKE ? ESCAPE '\\')")
         args += [like, like, like, like]
     if unread_only:
         conds.append("is_read = 0")
     if has_attach:
         conds.append("has_attachment = 1")
-    if conds:
-        sql += " WHERE " + " AND ".join(conds)
-    sql += " ORDER BY received_at DESC, id DESC LIMIT ?"
-    args.append(limit)
+    where = (" WHERE " + " AND ".join(conds)) if conds else ""
     with _LOCK, _conn() as conn:
-        rows = conn.execute(sql, args).fetchall()
+        total = conn.execute("SELECT COUNT(*) c FROM mails WHERE account_id = ?"
+                             if account_id else "SELECT COUNT(*) c FROM mails",
+                             base_args).fetchone()["c"]
+        rows = conn.execute(
+            sql + where + " ORDER BY received_at DESC, id DESC LIMIT ?",
+            tuple(args) + (limit,)).fetchall()
     return rows, total
 
 
 def get_mail(mail_id: int) -> sqlite3.Row | None:
     with _LOCK, _conn() as conn:
         return conn.execute("SELECT * FROM mails WHERE id=?", (mail_id,)).fetchone()
+
+
+def delete_mail(mail_id: int) -> None:
+    """删除单封本地缓存邮件（不动服务器）。"""
+    with _LOCK, _conn() as conn:
+        conn.execute("DELETE FROM mails WHERE id=?", (mail_id,))
 
 
 def mark_read(mail_id: int, read: bool = True) -> None:

@@ -92,9 +92,14 @@ class AccountDialog(tk.Toplevel):
                     self.var_port.set(str(port))
 
     def _fetch_folders(self):
-        """子线程连接服务器 LIST 文件夹，成功后回填下拉列表。"""
+        """子线程连接服务器 LIST 文件夹，成功后回填下拉列表。
+
+        线程安全：所有 tk 变量在启动线程**之前**取值；回填统一经
+        after 投递回主线程并判断窗口存活（用户可能中途关闭对话框）。
+        """
         host = self.var_host.get().strip()
         email_addr = self.var_email.get().strip()
+        use_ssl = self.var_ssl.get()
         password = self.var_pass.get()
         if not password and self.account:
             password = self.manager.password(self.account.id)
@@ -110,23 +115,35 @@ class AccountDialog(tk.Toplevel):
         def worker():
             from core.mail_client import MailClient
             acc_probe = Account(id="probe", name="", email=email_addr,
-                                imap_host=host, imap_port=port,
-                                ssl=self.var_ssl.get())
+                                imap_host=host, imap_port=port, ssl=use_ssl)
             try:
                 folders = MailClient.list_folders(acc_probe, password)
             except Exception as e:
-                self.after(0, lambda: self.lbl_folder_tip.configure(
+                self._dialog_after(lambda: self.lbl_folder_tip.configure(
                     text=f"获取失败：{type(e).__name__}"))
                 return
-
-            def apply():
-                self.cmb_folder.configure(values=folders)
-                self.lbl_folder_tip.configure(text=f"共 {len(folders)} 个文件夹")
-            self.after(0, apply)
+            self._dialog_after(lambda: (
+                self.cmb_folder.configure(values=folders),
+                self.lbl_folder_tip.configure(text=f"共 {len(folders)} 个文件夹"),
+            ))
 
         self.lbl_folder_tip.configure(text="正在连接…")
         import threading
         threading.Thread(target=worker, daemon=True).start()
+
+    def _dialog_after(self, fn):
+        """窗口可能已被用户关闭：投递回主线程，静默忽略已销毁的情况。"""
+        try:
+            self.after(0, self._safe_apply, fn)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _safe_apply(fn):
+        try:
+            fn()
+        except Exception:
+            pass  # 控件已销毁（对话框已关闭），忽略
 
     def _save(self):
         email_addr = self.var_email.get().strip()
@@ -142,9 +159,15 @@ class AccountDialog(tk.Toplevel):
         except ValueError:
             messagebox.showwarning("一邮通", "端口必须是数字", parent=self)
             return
-        if not password:
+        if not password and self.account is None:
             messagebox.showwarning("一邮通", "请填写密码或授权码", parent=self)
             return
+        if not password:
+            # 编辑已有账户：留空表示沿用已存的授权码，不必每次重输
+            password = self.manager.password(self.account.id)
+            if not password:
+                messagebox.showwarning("一邮通", "该账户尚无已存授权码，请填写", parent=self)
+                return
 
         name = self.var_name.get().strip() or email_addr
         folder = self.var_folder.get().strip() or "INBOX"
