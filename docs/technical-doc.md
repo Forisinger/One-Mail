@@ -52,14 +52,16 @@
 
 ```
 OneMail/
-├── docs/                  # this doc, development plan
+├── docs/                  # technical docs (English & Chinese)
 ├── src/
 │   ├── main.py            # entry point: single-instance check, engine + UI + tray
 │   ├── core/
 │   │   ├── account.py     # account model (IMAP+SMTP), manager, provider presets
 │   │   ├── mail_client.py # IMAP client (connect/IDLE/poll/reconnect)
 │   │   ├── smtp_client.py # outgoing mail: MIME building, sending, Sent sync
-│   │   ├── parser.py      # MIME parsing: body, attachments, headers
+│   │   ├── flag_sync.py   # read-flag sync (short-connection batched STORE)
+│   │   ├── ai_client.py   # AI client (OpenAI-compatible, v1.9.0)
+│   │   ├── parser.py      # MIME parsing: body (plain + HTML), attachments, headers
 │   │   ├── scheduler.py   # multi-account scheduling, event fan-out
 │   │   ├── security.py    # DPAPI encrypt/decrypt (ctypes)
 │   │   └── single_instance.py # Win32 named-mutex single instance + wake event
@@ -67,9 +69,13 @@ OneMail/
 │   │   ├── database.py    # SQLite schema & access
 │   │   └── config.py      # config.json read/write
 │   ├── ui/
-│   │   ├── main_window.py # main window (collapsible accounts / mail list / reader)
-│   │   ├── compose_window.py # compose window (CC/BCC, rich text, threaded send)
-│   │   ├── richtext.py    # Tk Text rich-text tags → HTML export
+│   │   ├── main_window.py # main window (accounts / local folders / mail list / reader)
+│   │   ├── compose_window.py # compose window (CC/BCC, rich text, AI write, threaded send)
+│   │   ├── settings_dialog.py # settings: language / theme / AI (v1.9.0)
+│   │   ├── htmltext.py    # HTML → Tk Text rich-text renderer (incoming, v1.9.0)
+│   │   ├── richtext.py    # Tk Text rich-text tags → HTML export (outgoing)
+│   │   ├── theme.py       # theme palettes: light / dark (v1.9.0)
+│   │   ├── i18n.py        # zh/en string table (v1.9.0)
 │   │   ├── tray.py        # tray icon, menu, unread badge
 │   │   ├── icon.py        # programmatic icon + badge rendering
 │   │   └── account_dialog.py
@@ -221,6 +227,40 @@ CREATE INDEX idx_mails_account ON mails(account_id, received_at DESC);
 - **Toggle**: tray check item "同步已读到服务器" reads/writes `settings.sync_read_flags` (default on; the `enabled` callback re-reads config each time so toggling takes effect immediately); when off, jobs are discarded before touching the network
 - **Testability**: `connector` / `get_credentials` / `enabled` are all constructor-injected (default `MailClient.mark_seen`), and `start_thread=False` allows direct offline testing of grouping/chunking/retry (14 tests)
 
+### 17. Incoming rich-text rendering (v1.9.0, htmltext.py)
+
+- **Fix**: before v1.9.0 the reading pane only showed tag-stripped plain text, losing all formatting of HTML mails. The HTML body is now stored at fetch time (`mails.body_html`, truncated to 128 KB; plain text stays 64 KB for search/quoting) and rendered in the reading pane
+- **Renderer**: built on `html.parser` — supports b/strong/i/em/u/s, inline span color, font color, h1-h6, br/p/div, lists, a (colored + underlined), blockquote, pre; lenient parsing with stack-based recovery for unclosed tags, worst case degrades to plain text, never raises
+- **Security**: no remote resource is ever loaded (images ignored); script/style/head content is dropped entirely; Tk Text rendering has no script execution capability
+- **Outgoing side unchanged**: compose rich text is still exported by `richtext.text_to_html`; reply quotes stay plain text
+
+### 18. Themes (v1.9.0, theme.py)
+
+- All UI colors centralized; `light` (original blue/white) and `dark` palettes; `colors()` reads the config, each window captures it once at construction
+- Switching writes `settings.theme`, **applies after restart** (Tk widget colors are fixed at construction; a runtime full repaint is not worth the complexity)
+
+### 19. Languages (v1.9.0, i18n.py)
+
+- Dictionary keyed by the Chinese string itself: `t("立即收信")` — zero cost in Chinese, automatic fallback to Chinese for missing English keys
+- `init()` runs before any UI is constructed; covers main window / tray / compose / account dialog / settings / AI dialogs; engine status texts are mapped at display time in `set_account_status`
+
+### 20. AI summary & write (v1.9.0, ai_client.py)
+
+- OpenAI-compatible `/chat/completions` via pure `urllib` (zero new dependencies); `build_request` is offline-unit-testable, `chat/summarize/draft` run on background threads only
+- Config: `settings.ai = {base_url, model}` in config.json; the API key goes through `security.save_password("__ai__", key)` (DPAPI), never plaintext
+- Summary truncates the body to 12 KB; drafting accepts optional context (reply quote); generated text replaces the body only after user confirmation
+- No streaming: outputs are small; a single response is simpler and more robust
+
+### 21. Local mail folders (v1.9.0)
+
+- `mails.local_folder` ('' = inbox) is kept **strictly separate** from `folder` (the server source folder) — attachment fetch and read-sync locate server mails by (uid, folder), so moving a mail only touches local_folder
+- Folder list lives in `settings.local_folders`; the account panel shows folders with unread badges; filtering is pushed down to SQL (`COALESCE(local_folder,'') = ?`); deleting a folder moves its mails back to the inbox
+
+### 22. Attachment open / save-as (v1.9.0)
+
+- Reuses the on-demand raw-fetch channel: background thread `fetch_raw` → `extract_attachments` → write to `%TEMP%/OneMail/<mail_id>/` → `os.startfile`; temp files are reused per mail (no re-download)
+- "Save As" uses `asksaveasfilename` (default name = attachment name); Windows reserved device names (CON/NUL/…) are sanitized
+
 ## 6. Runtime & Data Locations
 
 ```
@@ -243,4 +283,6 @@ Build: `pyinstaller build.spec --noconfirm` → `dist/OneMail.exe`.
 5. **SMTP unit tests** (test_smtp.py, offline): MIME header encoding, multi-recipient parsing, ASCII/Chinese attachment filenames (RFC 2231), SMTP host derivation — all passing
 6. **Live test**: real NetEase 163 mailbox — connect, auto-poll fallback, fetch with source label, end-to-end OK
 7. **Flag-sync unit tests** (test_flag_sync.py, offline, v1.7.0): dedup, per-account/folder grouping, numeric UID sort, 50-UID chunking, inline retry then drop, kill switch, missing-account safety, invalid-UID defense, plus imaplib-mock coverage of `mark_seen` (non-readonly SELECT, `.SILENT` seq-set, SELECT-NO/STORE-NO error paths, logout)
-8. **Packaged exe**: boots to tray, connects, fetches, no stderr output
+8. **v1.9.0 tests** (test_v19.py, offline): body_html parsing & DB round-trip, local folder move/counts/move-back, AI build_request validation, i18n fallback & English coverage check
+9. **UI smoke** (tools/ui_smoke.py): search debounce, filters, sorting, open-mail rendering, account status — full chain green
+10. **Packaged exe**: boots to tray, connects, fetches, no stderr output

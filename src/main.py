@@ -26,6 +26,7 @@ from notify import send as notify_send
 from single_instance import acquire, notify_running_instance, start_watcher
 from storage import config as config_store, database
 from storage.config import data_dir
+from ui import i18n
 from ui.main_window import MainWindow
 from ui.tray import (Tray, CMD_SHOW, CMD_FETCH_NOW, CMD_MARK_ALL,
                      CMD_TOGGLE_PAUSE, CMD_TOGGLE_SYNC, CMD_QUIT)
@@ -33,6 +34,7 @@ from ui.tray import (Tray, CMD_SHOW, CMD_FETCH_NOW, CMD_MARK_ALL,
 
 class App:
     def __init__(self, start_minimized: bool):
+        i18n.init()   # 语言在构造任何 UI 之前确定（v1.9.0）
         self.cfg = config_store.load()
         self.manager = AccountManager()
         self.scheduler = Scheduler(self.manager)
@@ -67,7 +69,7 @@ class App:
 
         self.update_badge()
         self.scheduler.start_all()
-        self._log("程序启动")
+        self._log(i18n.t("程序启动"))
         self.root.after(400, self.window.prompt_missing_password)
         self._poll_events()
 
@@ -149,12 +151,14 @@ class App:
         self.update_badge()
         if mails:
             first = mails[0]
-            title = f"一邮通 · {account.name}"
+            title = i18n.t("一邮通 · {name}").format(name=account.name)
             msg = f"{first['from_name'] or first['from_addr']}\n{first['subject']}"
             if len(mails) > 1:
-                msg += f"（等 {len(mails)} 封新邮件）"
+                msg += f"（{len(mails)}）"
             notify_send(self.tray.icon, title, msg)
-            self.window.set_status(f"[{account.name}] 收到 {len(mails)} 封新邮件")
+            self.window.set_status(
+                i18n.t("[{name}] 收到 {n} 封新邮件").format(
+                    name=account.name, n=len(mails)))
 
     def _handle_command(self, cmd: str):
         if cmd == CMD_SHOW:
@@ -173,10 +177,10 @@ class App:
             self.tray.set_paused(self.paused)
             if self.paused:
                 self.scheduler.stop_all()
-                self.window.set_status("收信已暂停")
+                self.window.set_status(i18n.t("收信已暂停"))
             else:
                 self.scheduler.start_all()
-                self.window.set_status("收信已恢复")
+                self.window.set_status(i18n.t("收信已恢复"))
         elif cmd == CMD_QUIT:
             self.quit()
 
@@ -187,8 +191,9 @@ class App:
             cur = bool(cfg.get("settings", {}).get("sync_read_flags", True))
             cfg.setdefault("settings", {})["sync_read_flags"] = not cur
             config_store.save(cfg)
-            state = "已开启" if not cur else "已关闭"
-            self.window.set_status(f"已读状态同步到服务器：{state}")
+            state = i18n.t("已开启") if not cur else i18n.t("已关闭")
+            self.window.set_status(
+                i18n.t("已读状态同步到服务器：{state}").format(state=state))
             self._log(f"sync_read_flags -> {not cur}")
         except Exception as e:
             self._log(f"切换已读同步设置失败: {e!r}")

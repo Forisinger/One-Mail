@@ -10,6 +10,7 @@ import queue
 import pystray
 
 from storage import config as config_store
+from . import i18n
 from . import icon as icon_mod
 
 # 托盘 -> UI 的命令类型
@@ -40,18 +41,18 @@ class Tray:
 
     def _build_menu(self) -> pystray.Menu:
         return pystray.Menu(
-            pystray.MenuItem("打开主界面", self._emit(CMD_SHOW), default=True),
+            pystray.MenuItem(i18n.t("打开主界面"), self._emit(CMD_SHOW), default=True),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("立即收信", self._emit(CMD_FETCH_NOW)),
+            pystray.MenuItem(i18n.t("立即收信"), self._emit(CMD_FETCH_NOW)),
             pystray.MenuItem(
-                lambda item: "恢复收信" if self._paused else "暂停收信",
+                lambda item: i18n.t("恢复收信") if self._paused else i18n.t("暂停收信"),
                 self._emit(CMD_TOGGLE_PAUSE),
             ),
-            pystray.MenuItem("全部标为已读", self._emit(CMD_MARK_ALL)),
-            pystray.MenuItem("同步已读到服务器", self._emit(CMD_TOGGLE_SYNC),
+            pystray.MenuItem(i18n.t("全部标为已读"), self._emit(CMD_MARK_ALL)),
+            pystray.MenuItem(i18n.t("同步已读到服务器"), self._emit(CMD_TOGGLE_SYNC),
                              checked=self._sync_checked),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("退出", self._emit(CMD_QUIT)),
+            pystray.MenuItem(i18n.t("退出"), self._emit(CMD_QUIT)),
         )
 
     def _sync_checked(self, _item) -> bool:
@@ -71,7 +72,7 @@ class Tray:
     def set_unread(self, count: int):
         try:
             self.icon.icon = icon_mod.with_badge(count)
-            self.icon.title = f"一邮通 OneMail｜未读 {count}"
+            self.icon.title = i18n.t("一邮通 OneMail｜未读 {n}").format(n=count)
         except Exception:
             pass
 

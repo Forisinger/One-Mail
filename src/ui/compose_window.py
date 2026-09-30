@@ -5,6 +5,7 @@
 - 收件人/抄送/密送支持逗号、分号、空格分隔；BCC 由 send_message 自动剥离
 - 正文支持基础富文本：加粗/斜体/下划线/字体颜色（tkinter 标签实现，零依赖）
 - 附件可增删；发送在后台线程执行，界面全程可响应
+- AI 写信（v1.9.0）：描述要求 → OpenAI 兼容接口生成正文（后台线程）
 - 完成后通过 root.after 回 UI 线程弹结果，杜绝跨线程碰 Tk
 """
 from __future__ import annotations
@@ -16,16 +17,13 @@ from tkinter import colorchooser, filedialog, messagebox, ttk
 
 from core.account import Account, AccountManager
 from core import smtp_client
+from . import i18n
+from . import theme as theme_mod
 from . import richtext
 
 ADDR_SPLIT = re.compile(r"[,;，；\s]+")
 ADDR_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
-BG = "#eef1f6"
-CARD = "#ffffff"
-TEXT = "#1f2937"
-GRAY = "#6b7280"
-ACCENT = "#1e64dc"
 FONT_UI = ("Microsoft YaHei UI", 10)
 FONT_UI_B = ("Microsoft YaHei UI", 10, "bold")
 
@@ -44,9 +42,11 @@ class ComposeWindow:
         self.manager = manager
         self.attachments: list[str] = []
         self._sending = False
+        self.C = theme_mod.colors()
+        CARD, TEXT, GRAY = self.C["CARD"], self.C["TEXT"], self.C["GRAY"]
 
         self.win = tk.Toplevel(root)
-        self.win.title("写邮件 · 一邮通")
+        self.win.title(i18n.t("写邮件 · 一邮通"))
         self.win.geometry("640x600")
         self.win.minsize(520, 460)
         self.win.configure(background=CARD)
@@ -68,7 +68,7 @@ class ComposeWindow:
             return e
 
         # 发件账户
-        row(0, "发件账户")
+        row(0, i18n.t("发件账户"))
         self.var_account = tk.StringVar()
         self.cmb_account = ttk.Combobox(frm, textvariable=self.var_account,
                                         state="readonly", font=FONT_UI)
@@ -82,23 +82,23 @@ class ComposeWindow:
             self.cmb_account.current(0)
 
         # 收件人 / 抄送 / 密送
-        row(1, "收件人")
+        row(1, i18n.t("收件人"))
         self.var_to = tk.StringVar(value=to)
         entry(1, self.var_to).focus_set()
-        row(2, "抄送")
+        row(2, i18n.t("抄送"))
         self.var_cc = tk.StringVar()
         entry(2, self.var_cc)
-        row(3, "密送")
+        row(3, i18n.t("密送"))
         self.var_bcc = tk.StringVar()
         entry(3, self.var_bcc)
 
         # 主题
-        row(4, "主题")
+        row(4, i18n.t("主题"))
         self.var_subject = tk.StringVar(value=subject)
         entry(4, self.var_subject)
 
         # 正文（格式工具条 + 文本区）
-        row(5, "正文")
+        row(5, i18n.t("正文"))
         body_wrap = ttk.Frame(frm, style="Card.TFrame")
         body_wrap.grid(row=5, column=1, sticky="nsew", pady=6)
         toolbar = tk.Frame(body_wrap, bg=CARD)
@@ -106,14 +106,15 @@ class ComposeWindow:
         for label, attr, font in STYLE_BUTTONS:
             btn = tk.Label(toolbar, text=label, bg=CARD, fg=GRAY, font=font,
                            width=3, cursor="hand2",
-                           highlightbackground="#d4dcea", highlightthickness=1)
+                           highlightbackground=self.C["BORDER"],
+                           highlightthickness=1)
             btn.pack(side="left", padx=(0, 4), pady=(0, 4))
             btn.bind("<Button-1>", lambda e, a=attr: self._toggle_font(a))
-        lbl_color = tk.Label(toolbar, text="颜色", bg=CARD, fg=ACCENT,
-                             font=FONT_UI, cursor="hand2")
+        lbl_color = tk.Label(toolbar, text=i18n.t("颜色"), bg=CARD,
+                             fg=self.C["ACCENT"], font=FONT_UI, cursor="hand2")
         lbl_color.pack(side="left", padx=2)
         lbl_color.bind("<Button-1>", lambda e: self._pick_color())
-        lbl_clear = tk.Label(toolbar, text="清除格式", bg=CARD, fg=GRAY,
+        lbl_clear = tk.Label(toolbar, text=i18n.t("清除格式"), bg=CARD, fg=GRAY,
                              font=FONT_UI, cursor="hand2")
         lbl_clear.pack(side="left", padx=8)
         lbl_clear.bind("<Button-1>", lambda e: self._clear_format())
@@ -141,16 +142,16 @@ class ComposeWindow:
                         font=font)
 
         # 附件
-        row(6, "附件")
+        row(6, i18n.t("附件"))
         att_bar = ttk.Frame(frm, style="Card.TFrame")
         att_bar.grid(row=6, column=1, sticky="we", pady=6)
-        ttk.Button(att_bar, text="添加附件…", command=self._add_attachment
-                   ).pack(side="left")
-        ttk.Button(att_bar, text="移除选中", command=self._remove_attachment
-                   ).pack(side="left", padx=6)
+        ttk.Button(att_bar, text=i18n.t("添加附件…"),
+                   command=self._add_attachment).pack(side="left")
+        ttk.Button(att_bar, text=i18n.t("移除选中"),
+                   command=self._remove_attachment).pack(side="left", padx=6)
         self.lst_att = tk.Listbox(att_bar, height=3, font=FONT_UI, bg=CARD,
                                   fg=TEXT, relief="solid", bd=1,
-                                  selectbackground=ACCENT,
+                                  selectbackground=self.C["ACCENT"],
                                   activestyle="none")
         self.lst_att.pack(side="left", fill="x", expand=True, padx=(8, 0))
 
@@ -160,11 +161,93 @@ class ComposeWindow:
         self.var_status = tk.StringVar()
         tk.Label(btn_bar, textvariable=self.var_status, bg=CARD, fg=GRAY,
                  font=FONT_UI).pack(side="left", padx=(0, 10))
-        self.btn_send = ttk.Button(btn_bar, text="发送", command=self.send)
+        ttk.Button(btn_bar, text=i18n.t("AI 写信"),
+                   command=self.ai_write).pack(side="right", padx=(0, 6))
+        self.btn_send = ttk.Button(btn_bar, text=i18n.t("发送"),
+                                   command=self.send)
         self.btn_send.pack(side="right")
 
         frm.columnconfigure(1, weight=1)
         frm.rowconfigure(5, weight=1)
+
+    # ---------- AI 写信（v1.9.0） ----------
+    def ai_write(self):
+        from core import ai_client
+        base_url, model, key = self._ai_conf()
+        if not base_url or not key:
+            messagebox.showinfo(i18n.t("一邮通"),
+                                i18n.t("请先配置 AI（设置 → AI 功能）"),
+                                parent=self.win)
+            return
+        # 小输入窗：描述写作要求
+        dlg = tk.Toplevel(self.win)
+        dlg.title(i18n.t("AI 写信"))
+        dlg.geometry("460x220")
+        dlg.transient(self.win)
+        dlg.grab_set()
+        ttk.Label(dlg, text=i18n.t("请描述要写的邮件内容：")).pack(
+            anchor="w", padx=12, pady=(10, 4))
+        txt = tk.Text(dlg, font=FONT_UI, wrap="word", height=6, bd=1,
+                      relief="solid")
+        txt.pack(fill="both", expand=True, padx=12)
+        txt.focus_set()
+        var = tk.StringVar()
+
+        def do_generate():
+            instruction = txt.get("1.0", "end").strip()
+            if not instruction:
+                return
+            var.set(i18n.t("AI 生成中…"))
+            # 回复场景：把现有正文（含引用）作为上下文交给 AI
+            context = self.txt_body.get("1.0", "end").strip()
+
+            def work():
+                try:
+                    result = ai_client.draft(base_url, key, model,
+                                             instruction, context)
+                except Exception as e:
+                    result = ""
+                    err = f"{type(e).__name__}: {e}"
+                    self.win.after(0, lambda: var.set(
+                        i18n.t("AI 生成失败：{err}").format(err=err)))
+                else:
+                    self.win.after(0, lambda: self._apply_ai_text(dlg, result, var))
+
+            threading.Thread(target=work, name="onemail-ai-draft",
+                             daemon=True).start()
+
+        btns = ttk.Frame(dlg)
+        btns.pack(fill="x", padx=12, pady=8)
+        tk.Label(btns, textvariable=var, fg=self.C["GRAY"], bg=self.C["CARD"],
+                 font=FONT_UI).pack(side="left")
+        ttk.Button(btns, text=i18n.t("取消"),
+                   command=dlg.destroy).pack(side="right", padx=4)
+        ttk.Button(btns, text=i18n.t("生成"), command=do_generate).pack(
+            side="right")
+
+    def _apply_ai_text(self, dlg: tk.Toplevel, text: str, var: tk.StringVar):
+        dlg.destroy()
+        if not text:
+            var.set(i18n.t("AI 未返回内容"))
+            return
+        if self.txt_body.get("1.0", "end").strip():
+            if not messagebox.askyesno(
+                    i18n.t("一邮通"),
+                    i18n.t("正文非空，是否替换为 AI 生成的内容？"),
+                    parent=self.win):
+                return
+        self.txt_body.delete("1.0", "end")
+        self.txt_body.insert("1.0", text)
+
+    def _ai_conf(self) -> tuple[str, str, str]:
+        from storage import config as config_store
+        from core import security
+        try:
+            ai = config_store.load().get("settings", {}).get("ai", {})
+        except Exception:
+            ai = {}
+        return (ai.get("base_url", ""), ai.get("model", ""),
+                security.load_password("__ai__"))
 
     # ---------- 富文本 ----------
     def _sel_range(self) -> tuple[str, str] | None:
@@ -233,7 +316,8 @@ class ComposeWindow:
 
     # ---------- 附件 ----------
     def _add_attachment(self):
-        paths = filedialog.askopenfilenames(parent=self.win, title="选择附件")
+        paths = filedialog.askopenfilenames(parent=self.win,
+                                            title=i18n.t("选择附件"))
         for p in paths:
             if p not in self.attachments:
                 self.attachments.append(p)
@@ -250,25 +334,29 @@ class ComposeWindow:
         addrs = [a for a in ADDR_SPLIT.split(raw.strip()) if a]
         bad = [a for a in addrs if not ADDR_RE.match(a)]
         if bad:
-            raise ValueError(f"地址格式有误：{', '.join(bad)}")
+            raise ValueError(i18n.t("地址格式有误：{addrs}")
+                             .format(addrs=", ".join(bad)))
         return addrs
 
     def send(self):
         if self._sending:
             return
         if not self._accounts:
-            messagebox.showwarning("一邮通", "没有可用账户：请先在主窗口添加账户并填入授权码",
-                                   parent=self.win)
+            messagebox.showwarning(
+                i18n.t("一邮通"),
+                i18n.t("没有可用账户：请先在主窗口添加账户并填入授权码"),
+                parent=self.win)
             return
         try:
             addrs = self.parse_addresses(self.var_to.get())
             cc = self.parse_addresses(self.var_cc.get()) if self.var_cc.get().strip() else []
             bcc = self.parse_addresses(self.var_bcc.get()) if self.var_bcc.get().strip() else []
         except ValueError as e:
-            messagebox.showwarning("一邮通", str(e), parent=self.win)
+            messagebox.showwarning(i18n.t("一邮通"), str(e), parent=self.win)
             return
         if not addrs and not cc and not bcc:
-            messagebox.showwarning("一邮通", "请填写收件人", parent=self.win)
+            messagebox.showwarning(i18n.t("一邮通"),
+                                   i18n.t("请填写收件人"), parent=self.win)
             return
         acc = self._accounts[self.cmb_account.current()]
         password = self.manager.password(acc.id)
@@ -279,7 +367,7 @@ class ComposeWindow:
 
         self._sending = True
         self.btn_send.configure(state="disabled")
-        self.var_status.set("正在发送…")
+        self.var_status.set(i18n.t("正在发送…"))
         # 发送中关窗会丢发送结果回调：先提示确认
         self.win.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -303,19 +391,21 @@ class ComposeWindow:
         self._sending = False
         self.btn_send.configure(state="normal")
         if ok:
-            self.var_status.set("已发送")
-            messagebox.showinfo("一邮通", "发送成功", parent=self.win)
+            self.var_status.set(i18n.t("已发送"))
+            messagebox.showinfo(i18n.t("一邮通"),
+                                i18n.t("发送成功"), parent=self.win)
             self.win.destroy()
         else:
-            self.var_status.set("发送失败")
+            self.var_status.set(i18n.t("发送失败"))
             messagebox.showerror(
-                "一邮通",
-                f"发送失败：{err}\n\n常见原因：授权码错误、未开启 SMTP 服务、"
-                f"附件过大或网络中断。", parent=self.win)
+                i18n.t("一邮通"),
+                i18n.t("发送失败：{err}\n\n常见原因：授权码错误、未开启 SMTP 服务、附件过大或网络中断。")
+                .format(err=err), parent=self.win)
 
     def _on_close(self):
         if self._sending and not messagebox.askyesno(
-                "一邮通", "邮件正在发送，关闭窗口后发送仍会继续但看不到结果。确定关闭？",
+                i18n.t("一邮通"),
+                i18n.t("邮件正在发送，关闭窗口后发送仍会继续但看不到结果。确定关闭？"),
                 parent=self.win):
             return
         self.win.destroy()

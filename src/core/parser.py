@@ -17,7 +17,8 @@ from email.utils import parseaddr, parsedate_to_datetime
 from html.parser import HTMLParser
 
 _CHARSET_FALLBACKS = ("utf-8", "gbk", "gb2312", "big5", "latin-1")
-_MAX_BODY = 64 * 1024  # 正文入库上限 64KB
+_MAX_BODY = 64 * 1024       # 纯文本正文入库上限 64KB
+_MAX_BODY_HTML = 128 * 1024  # HTML 原文入库上限 128KB（富文本渲染用，v1.9.0）
 
 
 @dataclass
@@ -29,6 +30,7 @@ class ParsedMail:
     from_name: str = ""
     received_at: str = ""          # ISO 格式，解析失败为空
     body_text: str = ""
+    body_html: str = ""            # HTML 正文原文（阅读区富文本渲染，v1.9.0）
     attachment_names: list = field(default_factory=list)
 
 
@@ -153,8 +155,11 @@ def _decode_header_value(value: str) -> str:
         return value or ""
 
 
-def _extract_body(msg) -> tuple[str, list[str]]:
-    """遍历 MIME 树，取正文（plain 优先）与附件名列表。"""
+def _extract_body(msg) -> tuple[str, str, list[str]]:
+    """遍历 MIME 树，取正文（plain 优先）与附件名列表。
+
+    返回 (纯文本, HTML 原文, 附件名)：HTML 原文供阅读区富文本渲染（v1.9.0）。
+    """
     body_plain = ""
     body_html = ""
     attachments: list[str] = []
@@ -186,7 +191,7 @@ def _extract_body(msg) -> tuple[str, list[str]]:
             text = text.text()
         except Exception:
             text = body_html
-    return text.strip()[:_MAX_BODY], attachments
+    return text.strip()[:_MAX_BODY], body_html[:_MAX_BODY_HTML], attachments
 
 
 def parse_raw(raw: bytes) -> ParsedMail:
@@ -221,7 +226,7 @@ def parse_raw(raw: bytes) -> ParsedMail:
         pass
 
     try:
-        out.body_text, out.attachment_names = _extract_body(msg)
+        out.body_text, out.body_html, out.attachment_names = _extract_body(msg)
     except Exception:
         pass
     return out

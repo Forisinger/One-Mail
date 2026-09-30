@@ -343,6 +343,7 @@ class MailClient:
                 "from_name": parsed.from_name,
                 "received_at": parsed.received_at,
                 "body_text": parsed.body_text,
+                "body_html": parsed.body_html,
                 "attachment_names": parsed.attachment_names,
             })
         if not batch:

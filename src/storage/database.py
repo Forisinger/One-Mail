@@ -20,11 +20,13 @@ CREATE TABLE IF NOT EXISTS mails (
     account_id TEXT NOT NULL,
     uid TEXT NOT NULL,
     folder TEXT DEFAULT 'INBOX',
+    local_folder TEXT DEFAULT '',
     message_id TEXT,
     from_addr TEXT,
     from_name TEXT,
     subject TEXT,
     body_text TEXT,
+    body_html TEXT,
     has_attachment INTEGER DEFAULT 0,
     received_at TEXT,
     fetched_at TEXT DEFAULT (datetime('now','localtime')),
@@ -33,6 +35,7 @@ CREATE TABLE IF NOT EXISTS mails (
 );
 CREATE INDEX IF NOT EXISTS idx_mails_account ON mails(account_id, received_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mails_unread ON mails(is_read);
+CREATE INDEX IF NOT EXISTS idx_mails_local ON mails(local_folder);
 CREATE TABLE IF NOT EXISTS folder_state (
     account_id TEXT NOT NULL,
     folder TEXT NOT NULL,
@@ -75,11 +78,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
             account_id TEXT NOT NULL,
             uid TEXT NOT NULL,
             folder TEXT DEFAULT 'INBOX',
+            local_folder TEXT DEFAULT '',
             message_id TEXT,
             from_addr TEXT,
             from_name TEXT,
             subject TEXT,
             body_text TEXT,
+            body_html TEXT,
             has_attachment INTEGER DEFAULT 0,
             received_at TEXT,
             fetched_at TEXT DEFAULT (datetime('now','localtime')),
@@ -87,15 +92,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
             UNIQUE(account_id, folder, uid)
         );
         INSERT OR IGNORE INTO mails_new
-            (id, account_id, uid, folder, message_id, from_addr, from_name,
-             subject, body_text, has_attachment, received_at, fetched_at, is_read)
-        SELECT id, account_id, uid, 'INBOX', {message_id}, {from_addr}, {from_name},
-               {subject}, {body_text}, {has_attach}, {received_at}, {fetched_at}, {is_read}
+            (id, account_id, uid, folder, local_folder, message_id, from_addr,
+             from_name, subject, body_text, body_html, has_attachment,
+             received_at, fetched_at, is_read)
+        SELECT id, account_id, uid, 'INBOX', '', {message_id}, {from_addr},
+               {from_name}, {subject}, {body_text}, '', {has_attach},
+               {received_at}, {fetched_at}, {is_read}
         FROM mails;
         DROP TABLE mails;
         ALTER TABLE mails_new RENAME TO mails;
         CREATE INDEX IF NOT EXISTS idx_mails_account ON mails(account_id, received_at DESC);
         CREATE INDEX IF NOT EXISTS idx_mails_unread ON mails(is_read);
+        CREATE INDEX IF NOT EXISTS idx_mails_local ON mails(local_folder);
         COMMIT;
     """)
 
@@ -120,10 +128,14 @@ def init() -> None:
     with _LOCK, _conn() as conn:
         _migrate(conn)
         conn.executescript(_SCHEMA)
-        # 增列兼容：attachment_names 为 v1.5.0 新增
+        # 增列兼容：attachment_names 为 v1.5.0 新增；body_html / local_folder 为 v1.9.0 新增
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(mails)")}
         if "attachment_names" not in cols:
             conn.execute("ALTER TABLE mails ADD COLUMN attachment_names TEXT")
+        if "body_html" not in cols:
+            conn.execute("ALTER TABLE mails ADD COLUMN body_html TEXT")
+        if "local_folder" not in cols:
+            conn.execute("ALTER TABLE mails ADD COLUMN local_folder TEXT DEFAULT ''")
 
 
 # 增量收信状态表建表语句已并入 _SCHEMA（见 init）
@@ -160,13 +172,16 @@ def insert_mails(account_id: str, mails: list[dict],
                 continue  # 无 UID 的异常批次不入库，避免炸掉整批
             cur = conn.execute(
                 """INSERT OR IGNORE INTO mails
-                   (account_id, uid, folder, message_id, from_addr, from_name, subject,
-                    body_text, has_attachment, received_at, attachment_names)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                   (account_id, uid, folder, local_folder, message_id, from_addr,
+                    from_name, subject, body_text, body_html, has_attachment,
+                    received_at, attachment_names)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
-                    account_id, m["uid"], folder or "INBOX", m.get("message_id", ""),
+                    account_id, m["uid"], folder or "INBOX", "",
+                    m.get("message_id", ""),
                     m.get("from_addr", ""), m.get("from_name", ""),
                     m.get("subject", ""), m.get("body_text", ""),
+                    m.get("body_html", ""),
                     1 if m.get("attachment_names") else 0,
                     m.get("received_at", ""),
                     json.dumps(m.get("attachment_names") or [], ensure_ascii=False),
@@ -196,11 +211,13 @@ def _escape_like(kw: str) -> str:
 
 def search_mails(account_id: str | None = None, keyword: str = "",
                  unread_only: bool = False, has_attach: bool = False,
+                 local_folder: str | None = None,
                  limit: int = 500) -> tuple[list[sqlite3.Row], int]:
-    """组合搜索：账户筛选 + 关键字（主题/发件人/正文）+ 未读/附件过滤。
+    """组合搜索：账户筛选 + 关键字（主题/发件人/正文）+ 未读/附件/本地文件夹过滤。
 
     返回 (结果行, 未筛选前总数)：总数用于状态栏显示「共 N 封（筛选后 M）」。
     两条查询在同一连接内完成，避免中途写入导致数字不一致。
+    local_folder: None=不过滤；''=收件箱；其他=对应本地文件夹（v1.9.0）。
     """
     sql = "SELECT * FROM mails"
     conds: list[str] = []
@@ -209,6 +226,9 @@ def search_mails(account_id: str | None = None, keyword: str = "",
         conds.append("account_id = ?")
         args.append(account_id)
     base_args = tuple(args)   # 账户筛选：total 只按账户计
+    if local_folder is not None:
+        conds.append("COALESCE(local_folder, '') = ?")
+        args.append(local_folder)
     kw = keyword.strip()
     if kw:
         like = f"%{_escape_like(kw)}%"
@@ -298,3 +318,43 @@ def delete_account_mails(account_id: str) -> None:
     with _LOCK, _conn() as conn:
         conn.execute("DELETE FROM mails WHERE account_id=?", (account_id,))
         conn.execute("DELETE FROM folder_state WHERE account_id=?", (account_id,))
+
+
+# ---------- 本地文件夹（v1.9.0） ----------
+
+def set_mail_local_folder(mail_id: int, local_folder: str) -> None:
+    """移动邮件到本地文件夹（'' = 收件箱）。不改 folder（服务器来源文件夹）。"""
+    with _LOCK, _conn() as conn:
+        conn.execute("UPDATE mails SET local_folder=? WHERE id=?",
+                     (local_folder, mail_id))
+
+
+def move_mails_to_folder(mail_ids: list[int], local_folder: str) -> int:
+    """批量移动，返回实际移动的封数（同一事务）。"""
+    if not mail_ids:
+        return 0
+    with _LOCK, _conn() as conn:
+        cur = conn.execute(
+            f"UPDATE mails SET local_folder=? WHERE id IN "
+            f"({','.join('?' * len(mail_ids))})",
+            (local_folder, *mail_ids))
+        return cur.rowcount
+
+
+def empty_local_folder(local_folder: str) -> int:
+    """清空本地文件夹：其中邮件全部移回收件箱（删除文件夹时用）。"""
+    with _LOCK, _conn() as conn:
+        cur = conn.execute(
+            "UPDATE mails SET local_folder='' WHERE local_folder=?",
+            (local_folder,))
+        return cur.rowcount
+
+
+def local_folder_counts() -> dict[str, tuple[int, int]]:
+    """各本地文件夹的 (总封数, 未读数)，含 ''（收件箱）。"""
+    with _LOCK, _conn() as conn:
+        rows = conn.execute(
+            "SELECT COALESCE(local_folder, '') lf, COUNT(*) c,"
+            " SUM(CASE WHEN is_read=0 THEN 1 ELSE 0 END) u"
+            " FROM mails GROUP BY lf").fetchall()
+    return {r["lf"]: (r["c"], r["u"]) for r in rows}

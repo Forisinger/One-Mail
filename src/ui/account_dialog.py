@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from core.account import Account, AccountManager
+from . import i18n
 
 
 class AccountDialog(tk.Toplevel):
@@ -20,7 +21,7 @@ class AccountDialog(tk.Toplevel):
         self.manager = manager
         self.account = account
         self.on_saved = on_saved
-        self.title("编辑账户" if account else "添加账户")
+        self.title(i18n.t("编辑账户") if account else i18n.t("添加账户"))
         self.resizable(False, False)
         self.grab_set()  # 模态
 
@@ -47,38 +48,38 @@ class AccountDialog(tk.Toplevel):
         folder = account.folder if account else "INBOX"
         self.var_folder = tk.StringVar(value=folder or "INBOX")
 
-        w0 = row("显示名：", lambda: ttk.Entry(frm, textvariable=self.var_name, width=30))
-        w1 = row("邮箱地址：", lambda: ttk.Entry(frm, textvariable=self.var_email, width=30))
-        w2 = row("密码/授权码：", lambda: ttk.Entry(frm, textvariable=self.var_pass,
+        w0 = row(i18n.t("显示名："), lambda: ttk.Entry(frm, textvariable=self.var_name, width=30))
+        w1 = row(i18n.t("邮箱地址："), lambda: ttk.Entry(frm, textvariable=self.var_email, width=30))
+        w2 = row(i18n.t("密码/授权码："), lambda: ttk.Entry(frm, textvariable=self.var_pass,
                                                    width=30, show="*"))
-        w3 = row("IMAP 服务器：", lambda: ttk.Entry(frm, textvariable=self.var_host, width=30))
-        w4 = row("端口：", lambda: ttk.Entry(frm, textvariable=self.var_port, width=10))
-        w5 = row("SSL：", lambda: ttk.Checkbutton(frm, variable=self.var_ssl))
+        w3 = row(i18n.t("IMAP 服务器："), lambda: ttk.Entry(frm, textvariable=self.var_host, width=30))
+        w4 = row(i18n.t("端口："), lambda: ttk.Entry(frm, textvariable=self.var_port, width=10))
+        w5 = row(i18n.t("SSL："), lambda: ttk.Checkbutton(frm, variable=self.var_ssl))
 
         # 收信文件夹：可手填，也可点「获取」从服务器拉取列表
         folder_cell = ttk.Frame(frm)
         self.cmb_folder = ttk.Combobox(folder_cell, textvariable=self.var_folder, width=22)
         self.cmb_folder.pack(side="left", fill="x", expand=True)
-        self.btn_fetch_folders = ttk.Button(folder_cell, text="获取",
+        self.btn_fetch_folders = ttk.Button(folder_cell, text=i18n.t("获取"),
                                             command=self._fetch_folders)
         self.btn_fetch_folders.pack(side="left", padx=(6, 0))
         self.lbl_folder_tip = ttk.Label(folder_cell, foreground="#888", text="")
         self.lbl_folder_tip.pack(side="left", padx=(6, 0))
-        w6 = row("收信文件夹：", lambda: folder_cell)
+        w6 = row(i18n.t("收信文件夹："), lambda: folder_cell)
 
         w1.bind("<FocusOut>", self._autofill_host)
         for w in (w0, w1, w2, w3, w4, w5, w6):
             frm.columnconfigure(1, weight=1)
 
         hint = ttk.Label(self, foreground="#888",
-                         text="提示：QQ/163 等国内邮箱需在网页邮箱设置中开启 IMAP，"
-                              "并使用「授权码」而非登录密码。")
+                         text=i18n.t("提示：QQ/163 等国内邮箱需在网页邮箱设置中开启 IMAP，"
+                                     "并使用「授权码」而非登录密码。"))
         hint.pack(anchor="w", padx=12)
 
         btns = ttk.Frame(self)
         btns.pack(fill="x", padx=12, pady=8)
-        ttk.Button(btns, text="取消", command=self.destroy).pack(side="right", padx=4)
-        ttk.Button(btns, text="保存", command=self._save).pack(side="right")
+        ttk.Button(btns, text=i18n.t("取消"), command=self.destroy).pack(side="right", padx=4)
+        ttk.Button(btns, text=i18n.t("保存"), command=self._save).pack(side="right")
 
     def _autofill_host(self, _evt=None):
         if self.var_host.get().strip():
@@ -104,12 +105,12 @@ class AccountDialog(tk.Toplevel):
         if not password and self.account:
             password = self.manager.password(self.account.id)
         if not host or "@" not in email_addr:
-            self.lbl_folder_tip.configure(text="请先填写邮箱与服务器")
+            self.lbl_folder_tip.configure(text=i18n.t("请先填写邮箱与服务器"))
             return
         try:
             port = int(self.var_port.get().strip() or 993)
         except ValueError:
-            self.lbl_folder_tip.configure(text="端口必须是数字")
+            self.lbl_folder_tip.configure(text=i18n.t("端口必须是数字"))
             return
 
         def worker():
@@ -120,14 +121,14 @@ class AccountDialog(tk.Toplevel):
                 folders = MailClient.list_folders(acc_probe, password)
             except Exception as e:
                 self._dialog_after(lambda: self.lbl_folder_tip.configure(
-                    text=f"获取失败：{type(e).__name__}"))
+                    text=i18n.t("获取失败：{err}").format(err=type(e).__name__)))
                 return
             self._dialog_after(lambda: (
                 self.cmb_folder.configure(values=folders),
                 self.lbl_folder_tip.configure(text=f"共 {len(folders)} 个文件夹"),
             ))
 
-        self.lbl_folder_tip.configure(text="正在连接…")
+        self.lbl_folder_tip.configure(text=i18n.t("正在连接…"))
         import threading
         threading.Thread(target=worker, daemon=True).start()
 
@@ -150,23 +151,23 @@ class AccountDialog(tk.Toplevel):
         password = self.var_pass.get()
         host = self.var_host.get().strip()
         if "@" not in email_addr:
-            messagebox.showwarning("一邮通", "请填写正确的邮箱地址", parent=self)
+            messagebox.showwarning(i18n.t("一邮通"), i18n.t("请填写正确的邮箱地址"), parent=self)
             return
         if not host:
             host, port = Account.guess_host(email_addr)
         try:
             port = int(self.var_port.get().strip() or 993)
         except ValueError:
-            messagebox.showwarning("一邮通", "端口必须是数字", parent=self)
+            messagebox.showwarning(i18n.t("一邮通"), i18n.t("端口必须是数字"), parent=self)
             return
         if not password and self.account is None:
-            messagebox.showwarning("一邮通", "请填写密码或授权码", parent=self)
+            messagebox.showwarning(i18n.t("一邮通"), i18n.t("请填写密码或授权码"), parent=self)
             return
         if not password:
             # 编辑已有账户：留空表示沿用已存的授权码，不必每次重输
             password = self.manager.password(self.account.id)
             if not password:
-                messagebox.showwarning("一邮通", "该账户尚无已存授权码，请填写", parent=self)
+                messagebox.showwarning(i18n.t("一邮通"), i18n.t("该账户尚无已存授权码，请填写"), parent=self)
                 return
 
         name = self.var_name.get().strip() or email_addr

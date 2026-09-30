@@ -17,10 +17,11 @@ from main import App
 
 def main():
     results: list[str] = []
-    app = App(False)
-    w = app.window
+    holder: dict = {}
 
     def drive():
+        app = holder["app"]
+        w = app.window
         try:
             # 1) 搜索防抖链路
             w._search_var.set("a")
@@ -84,8 +85,27 @@ def main():
             sum(1 for r in results if r.endswith("OK")) >= 5
         print("UI_SMOKE_OK" if ok else "UI_SMOKE_FAIL")
 
-    app.root.after(5000, drive)          # 等收信线程先连上
-    app.root.protocol("WM_DELETE_WINDOW", lambda: None)  # 关窗不藏托盘，走 quit
+    # App.__init__ 以 mainloop() 结尾且不返回——驱动回调必须在 mainloop
+    # 启动**之前**挂上，且 App 实例要在其构造期间就注册进 holder。
+    import tkinter as tk
+
+    class SmokeApp(App):
+        def __init__(self, *a, **kw):
+            holder["app"] = self
+            super().__init__(*a, **kw)
+
+    orig_mainloop = tk.Tk.mainloop
+    patched = {"done": False}
+
+    def mainloop_with_drive(self, *a, **kw):
+        if not patched["done"]:
+            patched["done"] = True
+            self.after(5000, drive)   # 等收信线程先连上
+        return orig_mainloop(self, *a, **kw)
+
+    tk.Tk.mainloop = mainloop_with_drive
+    SmokeApp(False)                   # 正常情况下不会走到这里（os._exit 退出）
+    report()
     return 0
 
 
