@@ -139,7 +139,10 @@ class FlagSync:
                 self._log(f"flag_sync: 取账户凭据异常（任务丢弃）: {e!r}")
                 self._forget(account_id, folder, uids, seen)
                 return
-            if account is None or not password:
+            if account is None or (
+                    not password
+                    and getattr(account, "auth_type", "password") != "oauth2"):
+                # OAuth2 账户没有密码字段（凭据在令牌里），放行（v1.10.0）
                 self._log(f"flag_sync: 账户 {account_id} 缺失/无授权码，"
                           f"{len(uids)} 个同步任务丢弃")
                 self._forget(account_id, folder, uids, seen)

@@ -21,10 +21,40 @@ from email.mime.text import MIMEText
 from email.utils import formataddr, formatdate, make_msgid
 
 from .account import Account
-from .mail_client import _decode_mutf7
+from .mail_client import _decode_mutf7, imap_login
 
 # 已发送文件夹的常见命名（按顺序探测）
 SENT_FOLDER_CANDIDATES = ("已发送", "Sent Messages", "Sent", "Sent Items")
+
+
+def smtp_connect_and_login(account: Account, password: str, timeout: float):
+    """建立 SMTP 连接并按账户认证方式登录（v1.10.0）。
+
+    - 端口 465 → SSL；其余端口（如 Outlook 的 587）→ 明文连 + STARTTLS
+    - OAuth2 账户走 raw AUTH XOAUTH2；密码账户维持原 smtplib.login
+    """
+    import smtplib as _smtplib
+    host, port = account.smtp_endpoint()
+    if port == 465:
+        srv = _smtplib.SMTP_SSL(host, port, timeout=timeout)
+    else:
+        srv = _smtplib.SMTP(host, port, timeout=timeout)
+        srv.ehlo()
+        srv.starttls()
+        srv.ehlo()
+    try:
+        if getattr(account, "auth_type", "password") == "oauth2":
+            from .oauth2 import OAuth2Error, get_access_token, smtp_auth
+            try:
+                smtp_auth(srv, account, get_access_token(account))
+            except OAuth2Error as e:
+                raise _smtplib.SMTPAuthenticationError(334, f"OAuth2: {e}".encode())
+        else:
+            srv.login(account.email, password)
+    except Exception:
+        srv.close()
+        raise
+    return srv
 
 
 def build_mime(account: Account, to_addrs: list[str], subject: str,
@@ -92,10 +122,8 @@ def send_mail(account: Account, password: str, to_addrs: list[str],
     """登录 SMTP 并发送。成功返回已组装的消息；失败抛 smtplib.SMTPException 等异常。"""
     msg = build_mime(account, to_addrs, subject, body, attachments,
                      cc_addrs=cc_addrs, bcc_addrs=bcc_addrs, html_body=html_body)
-    host, port = account.smtp_endpoint()
     envelope = list(to_addrs) + list(cc_addrs or []) + list(bcc_addrs or [])
-    with smtplib.SMTP_SSL(host, port, timeout=timeout) as srv:
-        srv.login(account.email, password)
+    with smtp_connect_and_login(account, password, timeout) as srv:
         srv.send_message(msg, to_addrs=envelope)
     return msg
 
@@ -113,7 +141,7 @@ def save_to_sent(account: Account, password: str, msg: Message,
         else:
             conn = imaplib.IMAP4(account.imap_host, account.imap_port, timeout=timeout)
         try:
-            conn.login(account.email, password)
+            imap_login(conn, account, password)
             typ, boxes = conn.list()
             if typ != "OK":
                 return False

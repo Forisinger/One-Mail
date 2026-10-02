@@ -4,6 +4,22 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/)。
 
+## [1.10.0] — 2026-10-02
+
+Gmail/Outlook OAuth2 登录、邮件图片显示、左上角设置入口、邮件列表右键新建文件夹。
+
+### Added · 新增
+
+- Gmail / Outlook OAuth2 登录：添加账户可选「OAuth2」认证方式，授权码 + PKCE + loopback 回调浏览器登录（纯标准库，零新增依赖）；令牌（含 refresh_token）经 Windows DPAPI 加密只存本机，过期自动刷新（锁内查-刷-存防并发双刷）；IMAP/SMTP 全部走 XOAUTH2（Outlook SMTP 587 STARTTLS 已适配）；Gmail/Outlook 域名自动预置官方服务器地址。需用户在 Google Cloud / Azure 注册应用获取 Client ID（README 有步骤）
+- 邮件图片显示：HTML 邮件的 <img> 不再只剩占位——CID 内嵌图（取原文解析）、data:URI、远程 http(s) 图均可显示；安全约束：每张 ≤3MB、每封 ≤10 张、PNG/JPEG/GIF 魔数校验、640px 缩宽、全部后台线程加载、换邮件立即作废未到的图
+- 左上角设置入口：⚙ 设置按钮移至工具栏第一位
+- 邮件列表右键新增「新建文件夹…」
+
+### Changed · 变更
+
+- 附件取原文与图片加载的 OAuth2 适配：flag_sync 不再把无密码的 OAuth2 账户判为缺授权码；写信窗口发件账户列表包含 OAuth2 账户
+- 文档：README / CHANGELOG 中英双份同步更新 OAuth2 与图片说明
+
 ## [1.9.0] — 2026-09-30
 
 富文本显示修复、主题与语言设置、附件打开/另存、AI 总结与写信、本地信件文件夹。

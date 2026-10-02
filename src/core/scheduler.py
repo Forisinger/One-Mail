@@ -42,8 +42,10 @@ class Scheduler:
     def start_account(self, acc: Account):
         with self._lock:
             self._stop_client_locked(acc.id)
-            if not self.manager.password(acc.id):
+            if not self.manager.password(acc.id) \
+                    and getattr(acc, "auth_type", "password") != "oauth2":
                 # 未设置密码：不起收信线程，等用户在界面录入授权码
+                # （OAuth2 账户无密码字段，凭据在令牌里，放行）
                 self.events.put({"type": EV_STATUS, "account": acc,
                                  "text": "未设置密码/授权码，请在界面中编辑账户"})
                 return

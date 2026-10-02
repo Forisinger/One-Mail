@@ -4,6 +4,22 @@ All notable changes to **OneMail** are documented here. (中文版见 [CHANGELOG
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.10.0] — 2026-10-02
+
+Gmail/Outlook OAuth2 sign-in, mail image display, top-left settings entry, right-click new folder in the mail list.
+
+### Added
+
+- Gmail / Outlook OAuth2: accounts can pick the OAuth2 auth method — authorization code + PKCE + loopback browser sign-in (stdlib only, zero new dependencies); tokens (incl. the refresh token) are DPAPI-encrypted and stored locally with automatic refresh (locked check-refresh-save, no concurrent double refresh); IMAP/SMTP both use XOAUTH2 (Outlook SMTP 587 STARTTLS handled); Gmail/Outlook domains auto-fill official server presets. Users register their own app in Google Cloud / Azure for a Client ID (steps in the README)
+- Mail image display: `<img>` in HTML mails is no longer just a placeholder — CID inline images (parsed from the raw mail), data: URIs and remote http(s) images all display; safety limits: ≤3 MB each, ≤10 per mail, PNG/JPEG/GIF magic-byte checks, 640px width cap, all loaded on background threads, and images for a mail you already left are discarded
+- Top-left settings entry: the ⚙ Settings button moved to the first position of the toolbar
+- "New Folder…" added to the mail-list context menu
+
+### Changed
+
+- OAuth2 adaptations for raw-fetch & image loading: flag_sync no longer treats password-less OAuth2 accounts as missing auth codes; the compose sender list includes OAuth2 accounts
+- Docs: bilingual README / CHANGELOG updated with OAuth2 and image details
+
 ## [1.9.0] — 2026-09-30
 
 Rich-text display fix, theme & language settings, attachment open/save-as, AI summary & write, local mail folders.

@@ -152,6 +152,7 @@ class MainWindow:
         bar.pack(fill="x")
 
         for text, cmd in (
+            (i18n.t("⚙ 设置"), self.open_settings),   # 左上角齿轮（v1.10.0 应晨央要求前置）
             (i18n.t("⟳ 立即收信"), self.fetch_now),
             (i18n.t("✉ 写邮件"), self.compose_new),
             (i18n.t("↩ 回复"), self.compose_reply),
@@ -161,7 +162,6 @@ class MainWindow:
             (i18n.t("－ 删除账户"), self.remove_account),
             (i18n.t("✓ 标记已读"), self.mark_selected_read),
             (i18n.t("🤖 AI 总结"), self.ai_summary),
-            (i18n.t("⚙ 设置"), self.open_settings),
         ):
             ttk.Button(bar, text=text, command=cmd,
                        style="Tool.TButton").pack(side="left", padx=(0, 6))
@@ -589,13 +589,90 @@ class MainWindow:
                 + "\n", "meta")
         self.txt_body.insert("end", "─" * 60 + "\n\n", "divider")
         body_html = mail["body_html"] if "body_html" in mail.keys() else ""
+        self._photo_refs = []             # 上一封的图片引用清掉（防泄漏）
+        self._img_gen = getattr(self, "_img_gen", 0) + 1
         if body_html:
-            # HTML 富文本渲染（v1.9.0）：忽略远程资源，仅内联样式
-            render_html(self.txt_body, body_html, FONT_UI, self.C)
+            # HTML 富文本渲染（v1.10.0）：图片占位 → 异步加载回填
+            images = render_html(self.txt_body, body_html, FONT_UI, self.C)
+            self.txt_body.configure(state="disabled")
+            if images:
+                self._load_mail_images(mail["id"], images)
         else:
             body = mail["body_text"] or i18n.t("（无正文/解析失败）")
             self.txt_body.insert("end", body, "body")
-        self.txt_body.configure(state="disabled")
+            self.txt_body.configure(state="disabled")
+
+    def _load_mail_images(self, mail_id: int, images):
+        """后台线程加载邮件图片（v1.10.0）：CID 内嵌/远程 http/data:URI。
+
+        限制见 imgload（每张 3MB、最多 10 张、魔数校验）；网络全在后台线程，
+        PhotoImage 创建与 Text 插入回主线程。换邮件后到达的图片按代次丢弃。
+        """
+        from . import imgload
+        gen = self._img_gen
+        acc = self.manager.get(self._current_mail["account_id"]) \
+            if self._current_mail else None
+        pwd = self.manager.password(acc.id) if acc else ""
+        uid = self._current_mail["uid"] if self._current_mail else ""
+        folder = (self._current_mail["folder"]
+                  or getattr(acc, "folder", "INBOX")) if self._current_mail else "INBOX"
+        need_raw = any(s.lower().startswith("cid:") for _t, s in images)
+        n_loaded = 0
+
+        def done():
+            if n_loaded:
+                self.var_status.set(i18n.t("已加载 {n} 张邮件图片").format(n=n_loaded))
+
+        def work():
+            nonlocal n_loaded
+            cmap = {}
+            if need_raw and acc is not None:
+                try:
+                    from core.mail_client import MailClient
+                    cmap = imgload.cid_map_from_raw(
+                        MailClient.fetch_raw(acc, pwd, folder, uid))
+                except Exception:
+                    cmap = {}
+            for tag, src in images:
+                if self._img_gen != gen:      # 用户已切到别的邮件
+                    return
+                try:
+                    if src.lower().startswith("cid:"):
+                        data = cmap.get(imgload.cid_from_src(src), b"")
+                    elif src.lower().startswith("data:"):
+                        data = imgload.data_b64_from_src(src) or b""
+                    else:
+                        data = imgload.download(src)
+                except Exception:
+                    continue
+                if not data:
+                    continue
+
+                def apply(tag=tag, data=data):
+                    if self._img_gen != gen:
+                        return
+                    try:
+                        ranges = self.txt_body.tag_ranges(tag)
+                        if not ranges:
+                            return
+                        photo = imgload.to_photo(data)
+                        if photo is None:
+                            return
+                        self._photo_refs.append(photo)   # 防 GC
+                        self.txt_body.configure(state="normal")
+                        self.txt_body.delete(ranges[0], ranges[1])
+                        self.txt_body.image_create(ranges[0], image=photo)
+                        self.txt_body.configure(state="disabled")
+                        nonlocal n_loaded
+                        n_loaded += 1
+                    except Exception:
+                        pass
+
+                self.root.after(0, apply)
+            self.root.after(0, done)
+
+        threading.Thread(target=work, name="onemail-img",
+                         daemon=True).start()
 
     @staticmethod
     def _mail_attachments(mail) -> list[str]:
@@ -641,6 +718,8 @@ class MainWindow:
         menu.add_separator()
         menu.add_command(label=i18n.t("标记为未读"),
                          command=self.mark_selected_unread)
+        # 邮件列表右键直接新建文件夹（v1.10.0）
+        menu.add_command(label=i18n.t("新建文件夹…"), command=self.create_folder)
         # 移动到本地文件夹（v1.9.0）
         folders = self._get_folders()
         if folders:
@@ -1019,7 +1098,8 @@ class MainWindow:
     def prompt_missing_password(self):
         """启动时若有账户缺密码，自动弹出编辑框录入授权码（保存后继续下一个）。"""
         for acc in self.manager.all():
-            if acc.enabled and not self.manager.password(acc.id):
+            if acc.enabled and not self.manager.password(acc.id) \
+                    and getattr(acc, "auth_type", "password") != "oauth2":
                 self.var_status.set(
                     i18n.t("账户 {name} 缺少授权码，请输入").format(name=acc.name))
 

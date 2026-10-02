@@ -61,6 +61,7 @@ OneMail/
 │   │   ├── smtp_client.py # outgoing mail: MIME building, sending, Sent sync
 │   │   ├── flag_sync.py   # read-flag sync (short-connection batched STORE)
 │   │   ├── ai_client.py   # AI client (OpenAI-compatible, v1.9.0)
+│   │   ├── oauth2.py      # OAuth2 (Gmail/Outlook XOAUTH2, v1.10.0)
 │   │   ├── parser.py      # MIME parsing: body (plain + HTML), attachments, headers
 │   │   ├── scheduler.py   # multi-account scheduling, event fan-out
 │   │   ├── security.py    # DPAPI encrypt/decrypt (ctypes)
@@ -73,6 +74,7 @@ OneMail/
 │   │   ├── compose_window.py # compose window (CC/BCC, rich text, AI write, threaded send)
 │   │   ├── settings_dialog.py # settings: language / theme / AI (v1.9.0)
 │   │   ├── htmltext.py    # HTML → Tk Text rich-text renderer (incoming, v1.9.0)
+│   │   ├── imgload.py     # mail image loading (CID/remote, v1.10.0)
 │   │   ├── richtext.py    # Tk Text rich-text tags → HTML export (outgoing)
 │   │   ├── theme.py       # theme palettes: light / dark (v1.9.0)
 │   │   ├── i18n.py        # zh/en string table (v1.9.0)
@@ -261,6 +263,28 @@ CREATE INDEX idx_mails_account ON mails(account_id, received_at DESC);
 - Reuses the on-demand raw-fetch channel: background thread `fetch_raw` → `extract_attachments` → write to `%TEMP%/OneMail/<mail_id>/` → `os.startfile`; temp files are reused per mail (no re-download)
 - "Save As" uses `asksaveasfilename` (default name = attachment name); Windows reserved device names (CON/NUL/…) are sanitized
 
+### 23. OAuth2 sign-in (v1.10.0, oauth2.py)
+
+- **Flow**: authorization code + PKCE(S256) → loopback callback (127.0.0.1 random port, http.server per-request handling with a 1s poll timeout, 5 min total) → browser consent → token exchange. Gmail scope `https://mail.google.com/`; Microsoft uses `/common/oauth2/v2.0` endpoints with scopes `offline_access + IMAP.AccessAsUser.All + SMTP.Send` (outlook.office.com resource, not Graph)
+- **Storage**: token JSON (access/refresh/expires_at/provider) DPAPI-encrypted under secrets key `__oauth2__::<email>`, never plaintext
+- **Refresh**: `get_access_token` fires 120 s before expiry; the check-refresh-save is atomic inside a module lock so the scheduler and flag_sync threads never double-refresh; `invalid_grant` deletes the bad token and forces re-login
+- **Integration**: `mail_client.imap_login` is the single login entry (4 call sites); SMTP uses raw `AUTH XOAUTH2` (a 334 challenge means failure — send an empty line to cancel); Outlook SMTP on port 587 uses STARTTLS (465 stays SSL)
+- **Account model**: new `auth_type` (password|oauth2), `client_id`, `client_secret` fields; the "no password" gates in scheduler / prompt_missing_password / compose all let OAuth2 accounts through; deleting an account deletes its tokens
+- **UI**: account dialog gains an auth-method dropdown, Client ID/Secret inputs and a background-thread "Sign in via Browser" button; picking OAuth2 hides the password row (whole row, label included)
+
+### 24. Mail image display (v1.10.0, imgload.py)
+
+- htmltext inserts an alt-text placeholder for `<img>` and records `(tag, src)`; render_html returns the list
+- Three sources: `cid:` inline images (background fetch_raw → email parsing by Content-ID → bytes), `data:` URIs (base64), remote http(s) (urllib download)
+- **Safety limits**: http/https only; ≤3 MB per image (oversized dropped); ≤10 per mail; PNG/JPEG/GIF magic-byte validation; 10 s download timeout
+- **Threading**: download/parse on background threads; `to_photo` (Pillow decode + 640px downscale) and Text insertion happen on the main thread via `after`; a `_img_gen` generation counter discards images arriving after the user switched mail; `_photo_refs` holds references against GC
+- Pillow is an existing dependency (tray icon), zero additions
+
+### 25. UI tweaks (v1.10.0)
+
+- The ⚙ Settings button moved to the first toolbar position (top-left)
+- The mail-list context menu gains "New Folder…" (reuses create_folder)
+
 ## 6. Runtime & Data Locations
 
 ```
@@ -285,4 +309,5 @@ Build: `pyinstaller build.spec --noconfirm` → `dist/OneMail.exe`.
 7. **Flag-sync unit tests** (test_flag_sync.py, offline, v1.7.0): dedup, per-account/folder grouping, numeric UID sort, 50-UID chunking, inline retry then drop, kill switch, missing-account safety, invalid-UID defense, plus imaplib-mock coverage of `mark_seen` (non-readonly SELECT, `.SILENT` seq-set, SELECT-NO/STORE-NO error paths, logout)
 8. **v1.9.0 tests** (test_v19.py, offline): body_html parsing & DB round-trip, local folder move/counts/move-back, AI build_request validation, i18n fallback & English coverage check
 9. **UI smoke** (tools/ui_smoke.py): search debounce, filters, sorting, open-mail rendering, account status — full chain green
+10. **v1.10.0 tests** (test_oauth2.py, offline): PKCE, auth URLs, token request/response handling, expiry/refresh decision, XOAUTH2 string, token store round-trip, image magic/CID/data-URI, img placeholder rendering
 10. **Packaged exe**: boots to tray, connects, fetches, no stderr output

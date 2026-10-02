@@ -11,12 +11,13 @@
 | Feature | Description |
 |---|---|
 | 📬 Multi-account IMAP fetching | Every mail labeled by source account, list filterable per account |
-| 🎨 Rich-text mail display | HTML mails rendered with formatting (bold/italic/underline/color/headings/lists/links); no remote resources loaded |
+| 🔑 Gmail / Outlook OAuth2 | Authorization-code + PKCE browser sign-in, DPAPI-encrypted tokens with auto refresh — no app passwords |
+| 🎨 Rich-text mail display | HTML mails rendered with formatting (bold/italic/underline/color/headings/lists/links/images); images shown after safety checks |
 | 🌗 Themes | Light (default) / Dark, switchable in the settings dialog |
 | 🌐 Language | 中文 / English UI |
 | ✉️ Compose & reply | Attachments, rich-text body (HTML + plain fallback), CC & BCC, sent on a background thread |
 | 🤖 AI summary / AI write | OpenAI-compatible endpoints (DeepSeek, GPT, Qwen, …) with user-provided base URL / model / key; key encrypted via DPAPI |
-| 📁 Local mail folders | Create/delete custom folders, move mails in/out, unread badges |
+| 📁 Local mail folders | Create/delete custom folders (account panel or mail-list right-click), move mails in/out, unread badges |
 | 🔍 Full-text search | Body search included, plus Unread / Has-attachment filters and click-to-sort columns |
 | 📎 Attachments | Open (system default app), Save As, Save All (on-demand server fetch) |
 | ✅ Read-state sync | Batched \Seen writes back to the server (tray toggle), mark-as-unread supported |
@@ -61,18 +62,23 @@ pyinstaller build.spec --noconfirm
 1. Double-clicking the exe opens the main window directly; when launched by auto-start it goes silently to the tray (red badge shows unread count). Re-launching the exe while running wakes the window to front.
 2. Click **＋ Add Account**, enter your address and **authorization code**.
 3. Done — new mail shows up in the list, labeled by source, with balloon notifications.
-4. Right-click to copy subject / sender / address / body anywhere; the reading-pane context menu also offers **attachment open / save-as**, **move to folder**, and **AI summary**. Click column headers to sort, and use the 🔍 search box + All/Unread/Attachments filter — body text is searched too.
-5. Toolbar **⚙ Settings**: switch language & theme (applies after restart), configure AI (base URL / model / key).
+4. Right-click to copy subject / sender / address / body anywhere; the reading-pane context menu also offers **attachment open / save-as**, **move to folder**, **new folder**, and **AI summary**. Click column headers to sort, and use the 🔍 search box + All/Unread/Attachments filter — body text is searched too.
+5. The **⚙ Settings** button sits at the top-left of the toolbar: switch language & theme (applies after restart), configure AI (base URL / model / key).
 
 **Provider note**: QQ Mail / NetEase 163/126 and most Chinese providers require an **authorization code** instead of your login password — enable IMAP **and SMTP** in the web settings, generate the code, and paste it into OneMail. The same code is used for both receiving and sending. NetEase additionally requires the IMAP `ID` handshake, which OneMail sends automatically.
+
+**Gmail / Outlook (OAuth2)**: when adding the account pick **OAuth2** as the auth method — OneMail fills in the official server addresses automatically. You need your own **Client ID**:
+- Gmail: in [Google Cloud Console](https://console.cloud.google.com/) create a project → OAuth consent screen (External, add yourself as test user) → Credentials → create an **OAuth Client ID (Desktop app)**, paste the Client ID (and Secret) into OneMail and click **Sign in via Browser**;
+- Outlook: register a **public client** app under [Azure portal - App registrations](https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade) (redirect URI "Mobile and desktop applications" → `http://localhost`; delegated permissions `IMAP.AccessAsUser.All`, `SMTP.Send`), paste the Application (client) ID into OneMail and click **Sign in via Browser**.
+Tokens (incl. the refresh token) are DPAPI-encrypted and stay on your machine, refreshing automatically when expired; no network calls beyond your own mail provider, the image hosts and the AI service you configure.
 
 **AI note**: any OpenAI-compatible endpoint works, e.g. DeepSeek (`https://api.deepseek.com/v1`, model `deepseek-chat`) or OpenAI (`https://api.openai.com/v1`, model `gpt-4o-mini`). The API key stays on your machine (DPAPI-encrypted, bound to your Windows user); no network calls beyond your own mail servers and the AI service you configure.
 
 ## 🔒 Privacy & Security
 
-- Passwords and the AI key are encrypted with **Windows DPAPI**, bound to your Windows user; they never appear in config files.
-- Mail data stays in a local SQLite file (`%APPDATA%/OneMail/`). No telemetry; no network calls other than your own mail servers and the AI service you configure.
-- Rich-text rendering loads no remote images and executes no script content.
+- Passwords, the AI key and OAuth2 tokens are encrypted with **Windows DPAPI**, bound to your Windows user; they never appear in config files.
+- Mail data stays in a local SQLite file (`%APPDATA%/OneMail/`). No telemetry; no network calls other than your own mail servers, the image hosts and the AI service you configure.
+- Rich-text rendering executes no script content; mail images pass size / magic-byte checks before display.
 
 ## 🧱 Tech Overview
 
@@ -82,7 +88,8 @@ pyinstaller build.spec --noconfirm
 - Full stdlib-first design — third-party runtime dependencies are exactly `pystray` + `Pillow`
 - Exponential-backoff reconnect, connection-state verification before every fetch
 - GBK/GB2312/Big5 encoding fallback chain for Chinese mail
-- Zero-dependency incoming rich-text rendering (`html.parser`), no remote resources
+- Zero-dependency incoming rich-text rendering (`html.parser`); mail images load under strict limits (≤3 MB each, ≤10 per mail, magic-byte checks, 640px cap, all on background threads)
+- OAuth2 implemented with the stdlib only (authorization code + PKCE + loopback callback), zero new dependencies
 
 Details in the docs: [Technical Documentation](docs/technical-doc.md) · [中文技术文档](docs/技术文档.md)
 
@@ -95,7 +102,8 @@ Details in the docs: [Technical Documentation](docs/technical-doc.md) · [中文
 - [x] Read-state sync to the server ✅ v1.7.0
 - [x] Mark as unread ✅ v1.8.0
 - [x] Rich-text display / themes / language / attachment open / AI summary & write / local folders ✅ v1.9.0
-- [ ] OAuth2 for Gmail/Outlook
+- [x] Mail images / top-left settings entry / right-click new folder ✅ v1.10.0
+- [x] OAuth2 for Gmail/Outlook ✅ v1.10.0
 
 ## 📄 License
 

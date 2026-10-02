@@ -73,7 +73,9 @@ class ComposeWindow:
         self.cmb_account = ttk.Combobox(frm, textvariable=self.var_account,
                                         state="readonly", font=FONT_UI)
         self.cmb_account.grid(row=0, column=1, sticky="we", pady=6)
-        self._accounts = [a for a in manager.all() if manager.password(a.id)]
+        self._accounts = [a for a in manager.all()
+                          if manager.password(a.id)
+                          or getattr(a, "auth_type", "password") == "oauth2"]
         self.cmb_account["values"] = [
             f"{a.name} <{a.email}>" for a in self._accounts]
         if account and account in self._accounts:

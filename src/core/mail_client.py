@@ -30,6 +30,26 @@ _CONNECT_TIMEOUT = 15            # IMAP 建连超时（秒），含 list_folders
 # 从 IDLE 未请求响应里抓邮箱状态行（如 * 23 EXISTS）
 _EXISTS_RE = re.compile(rb"\*\s+(\d+)\s+EXISTS", re.IGNORECASE)
 
+
+def imap_login(conn, account, password: str) -> None:
+    """按账户认证方式登录 IMAP：密码登录 or OAuth2 XOAUTH2（v1.10.0）。
+
+    OAuth2 账户忽略 password 参数，凭据取自 DPAPI 存储的令牌（自动刷新）；
+    OAuth2Error 统一包装成 imaplib.IMAP4.error，走既有的重连/报错通道。
+    """
+    if getattr(account, "auth_type", "password") == "oauth2":
+        from .oauth2 import OAuth2Error, get_access_token, imap_authenticate
+        try:
+            token = get_access_token(account)
+        except OAuth2Error as e:
+            raise imaplib.IMAP4.error(f"OAuth2: {e}") from e
+        try:
+            imap_authenticate(conn, account, token)
+        except OAuth2Error as e:
+            raise imaplib.IMAP4.error(f"OAuth2: {e}") from e
+    else:
+        conn.login(account.email, password)
+
 # imaplib 不内置 ID 命令；163/126 等国内服务器要求登录后上报客户端身份，
 # 否则后续命令可能被服务端拒绝/踢线。声明后才能用 _simple_command 发送。
 imaplib.Commands["ID"] = ("AUTH", "SELECTED")
@@ -126,7 +146,7 @@ class MailClient:
         else:
             conn = imaplib.IMAP4(acc.imap_host, acc.imap_port,
                                  timeout=_CONNECT_TIMEOUT)
-        conn.login(acc.email, self.password)
+        imap_login(conn, acc, self.password)
         self._send_client_id(conn)      # 163/126：必须上报客户端 ID
         conn.select(self._folder_wire(), readonly=True)
         return conn
@@ -377,7 +397,7 @@ class MailClient:
             conn = imaplib.IMAP4(account.imap_host, account.imap_port,
                                  timeout=_CONNECT_TIMEOUT)
         try:
-            conn.login(account.email, password)
+            imap_login(conn, account, password)
             MailClient._send_client_id(conn)
             typ, data = conn.list('""', '*')
             if typ != "OK" or not data:
@@ -432,7 +452,7 @@ class MailClient:
             conn = imaplib.IMAP4(account.imap_host, account.imap_port,
                                  timeout=timeout)
         try:
-            conn.login(account.email, password)
+            imap_login(conn, account, password)
             MailClient._send_client_id(conn)
             # STORE 要求可写会话：绝不能 readonly
             typ, data = conn.select(folder_to_wire(folder), readonly=False)
@@ -467,7 +487,7 @@ class MailClient:
             conn = imaplib.IMAP4(account.imap_host, account.imap_port,
                                  timeout=timeout)
         try:
-            conn.login(account.email, password)
+            imap_login(conn, account, password)
             MailClient._send_client_id(conn)
             conn.select(folder_to_wire(folder), readonly=True)
             typ, msgdata = conn.uid("fetch", uid, "(BODY.PEEK[])")

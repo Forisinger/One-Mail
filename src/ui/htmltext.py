@@ -58,6 +58,9 @@ class _Renderer(HTMLParser):
         self.skip: list[str] = []
         self._tag_no = 0
         self._list_stack: list[str] = []
+        # v1.10.0：img 占位登记 [(标签名, src)]，图片由 imgload 后台加载回填
+        self.images: list[tuple[str, str]] = []
+        self.w.tag_configure("imgph", foreground=colors.get("GRAY", "#888888"))
 
     # ---------- 标签管理 ----------
     def _tag(self, **conf) -> str:
@@ -107,6 +110,9 @@ class _Renderer(HTMLParser):
 
         old = self.style
         a = dict(attrs)
+        if tag == "img":
+            self._handle_img(a)
+            return
         if tag in ("b", "strong"):
             self.style = old.copy(bold=True)
         elif tag in ("i", "em"):
@@ -164,21 +170,45 @@ class _Renderer(HTMLParser):
         if tag == "br" and not self.skip:
             self.w.insert("end", "\n")
 
-    # img：不加载远程资源，仅占位提示
-    def handle_decl(self, decl):
-        pass
+    # ---------- 图片（v1.10.0）：插占位符并登记，交给 imgload 异步回填 ----------
+    def _handle_img(self, attrs: dict):
+        src = (attrs.get("src") or "").strip()
+        if not src:
+            return
+        if len(self.images) >= 10:      # 与 imgload.MAX_IMAGES 一致，防巨量占位
+            return
+        name = f"img{self._tag_no}"
+        self._tag_no += 1
+        self.w.tag_configure(name)
+        alt = (attrs.get("alt") or "").strip()
+        self.w.insert("end", alt or "［图片］", (name, "imgph"))
+        self.images.append((name, src))
+
+    def handle_startendtag(self, tag, attrs):
+        # 自闭合写法 <img/> <br/>：默认实现会走 starttag+endtag，
+        # 但这里 img 需要单独路径，br 需要换行，其余块级标签不用管
+        if tag in _SKIP:
+            return
+        if self.skip:
+            return
+        if tag == "br":
+            self.w.insert("end", "\n")
+        elif tag == "img":
+            self._handle_img(dict(attrs))
 
 
-def render_html(widget: tk.Text, html: str, base_font, colors: dict[str, str]) -> None:
+def render_html(widget: tk.Text, html: str, base_font, colors: dict[str, str]) -> list:
     """把 HTML 正文渲染进 Text 控件（调用方保证控件已 state="normal"）。
 
+    返回 [(占位标签名, src)] 供异步图片加载（v1.10.0）；
     任何解析异常都被吞掉：最坏情况正文缺失，但绝不让收件流程报错。
     """
     if not html:
-        return
+        return []
     try:
         r = _Renderer(widget, base_font, colors)
         r.feed(html)
         r.close()
+        return r.images
     except Exception:
-        pass
+        return []

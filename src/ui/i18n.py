@@ -162,6 +162,26 @@ _EN = {
     "正在连接…": "Connecting…",
     "共 {n} 个文件夹": "{n} folders",
     "获取失败：{err}": "Fetch failed: {err}",
+    # ---- 账户对话框 · OAuth2（v1.10.0） ----
+    "授权码 / 密码": "Auth code / password",
+    "OAuth2（Gmail / Outlook）": "OAuth2 (Gmail / Outlook)",
+    "认证方式：": "Auth method:",
+    "OAuth2 Client ID：": "OAuth2 Client ID:",
+    "Client Secret（可选）：": "Client Secret (optional):",
+    "浏览器登录": "Sign in via Browser",
+    "请先填写邮箱与 Client ID": "Fill in email and Client ID first",
+    "未识别的 OAuth2 域名（仅支持 Gmail/Outlook）":
+        "Unrecognized OAuth2 domain (Gmail/Outlook only)",
+    "已打开浏览器，请完成登录…": "Browser opened, please sign in…",
+    "登录成功，令牌已保存": "Signed in, token saved",
+    "登录失败：{err}": "Sign-in failed: {err}",
+    "OAuth2 需要填写 Client ID": "OAuth2 requires a Client ID",
+    "请先点「浏览器登录」完成 OAuth2 授权":
+        "Click \"Sign in via Browser\" to finish OAuth2 authorization first",
+    "提示：QQ/163 等国内邮箱用「授权码」；Gmail/Outlook 选 OAuth2，需先在 Google Cloud / Azure 注册应用拿到 Client ID。":
+        "Note: Chinese providers use an auth code; for Gmail/Outlook pick OAuth2 and register an app in Google Cloud / Azure to get a Client ID.",
+    # ---- 图片（v1.10.0） ----
+    "已加载 {n} 张邮件图片": "Loaded {n} mail image(s)",
     # ---- 设置对话框 ----
     "设置": "Settings",
     "语言（重启生效）": "Language (restart to apply)",

@@ -21,7 +21,35 @@ KNOWN_HOSTS = {
     "sohu.com": ("imap.sohu.com", 993),
     "aliyun.com": ("imap.aliyun.com", 993),
     "139.com": ("imap.139.com", 993),
+    # OAuth2 大厂（v1.10.0）：域名必须显式预置，guess_host 的 imap.<域> 推导会猜错
+    "gmail.com": ("imap.gmail.com", 993),
+    "googlemail.com": ("imap.gmail.com", 993),
+    "outlook.com": ("outlook.office365.com", 993),
+    "hotmail.com": ("outlook.office365.com", 993),
+    "hotmail.co.uk": ("outlook.office365.com", 993),
+    "live.com": ("outlook.office365.com", 993),
+    "msn.com": ("outlook.office365.com", 993),
 }
+
+# OAuth2 提供者预置：域名 -> (provider, smtp_host, smtp_port)
+OAUTH_DOMAINS = {
+    "gmail.com": ("google", "smtp.gmail.com", 465),
+    "googlemail.com": ("google", "smtp.gmail.com", 465),
+    "outlook.com": ("microsoft", "smtp.office365.com", 587),
+    "hotmail.com": ("microsoft", "smtp.office365.com", 587),
+    "hotmail.co.uk": ("microsoft", "smtp.office365.com", 587),
+    "live.com": ("microsoft", "smtp.office365.com", 587),
+    "msn.com": ("microsoft", "smtp.office365.com", 587),
+}
+
+
+def oauth_provider_for(email_addr: str) -> str | None:
+    """按邮箱域名猜 OAuth2 提供者（google / microsoft / None=未知）。"""
+    domain = (email_addr or "").rsplit("@", 1)[-1].lower()
+    for d, (provider, _smtp_h, _smtp_p) in OAUTH_DOMAINS.items():
+        if domain == d or domain.endswith("." + d):
+            return provider
+    return None
 
 
 @dataclass
@@ -38,6 +66,9 @@ class Account:
     poll_interval: int = 300             # IDLE 不可用时的轮询间隔
     smtp_host: str = ""                  # 留空则由 imap_host 推导
     smtp_port: int = 465                 # SMTP SSL 标准端口
+    auth_type: str = "password"          # password | oauth2（v1.10.0）
+    client_id: str = ""                  # OAuth2 应用注册的 client_id
+    client_secret: str = ""              # 可选（Google 桌面应用通常有）
     extra: dict = field(default_factory=dict)
 
     @staticmethod
@@ -117,8 +148,15 @@ class AccountManager:
         self._persist()
 
     def remove(self, account_id: str) -> None:
+        acc = self._accounts.get(account_id)
         self._accounts.pop(account_id, None)
         security.delete_password(account_id)
+        if acc is not None:
+            from .oauth2 import delete_token
+            try:
+                delete_token(acc.email)
+            except Exception:
+                pass
         self._persist()
 
     def _persist(self) -> None:
