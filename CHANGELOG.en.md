@@ -4,6 +4,17 @@ All notable changes to **OneMail** are documented here. (中文版见 [CHANGELOG
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.10.3] — 2026-10-02
+
+Fourth multi-agent review round: lifecycle & single-instance.
+
+### Fixed
+
+- High-severity race: removing an account while its fetch thread was still connecting could resurrect fetched mails into the deleted account's tables (permanent ghost mails, inflated unread badge). The thread now checks the stop flag after connect/before reconciliation/insert, and the scheduler joins the thread (bounded ≤10 s) before returning
+- Account edit (thread restart):水位回退 risk removed (start moved inside the lock + join)
+- Single instance: CreateMutexW failure returns INVALID_HANDLE_VALUE(-1), not NULL — the old check silently allowed a second instance in restricted environments
+- scheduler reads the DPAPI password once instead of twice
+
 ## [1.10.2] — 2026-10-02
 
 Second multi-agent review round: rendering & credential hygiene.

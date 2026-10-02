@@ -42,19 +42,21 @@ class Scheduler:
     def start_account(self, acc: Account):
         with self._lock:
             self._stop_client_locked(acc.id)
-            if not self.manager.password(acc.id) \
-                    and getattr(acc, "auth_type", "password") != "oauth2":
+            pwd = self.manager.password(acc.id)   # DPAPI 读取只做一次
+            if not pwd and getattr(acc, "auth_type", "password") != "oauth2":
                 # 未设置密码：不起收信线程，等用户在界面录入授权码
                 # （OAuth2 账户无密码字段，凭据在令牌里，放行）
                 self.events.put({"type": EV_STATUS, "account": acc,
                                  "text": "未设置密码/授权码，请在界面中编辑账户"})
                 return
             client = MailClient(
-                acc, self.manager.password(acc.id),
+                acc, pwd,
                 on_new_mail=self._emit_new_mail, on_status=self._emit_status,
             )
             self._clients[acc.id] = client
-        client.start()
+            # start 放锁内：防止尚未 start 的实例被并发 stop_account 取走
+            # 后又被此处 start"复活"（v1.10.2 审查修复）
+            client.start()
 
     def stop_account(self, account_id: str):
         with self._lock:
@@ -64,6 +66,11 @@ class Scheduler:
         client = self._clients.pop(account_id, None)
         if client is not None:
             client.stop()
+            # 有界 join：确保线程真正退出后再返回。否则删账户场景里，
+            # 还卡在 _connect 的线程会在 delete_account_mails 之后把
+            # 抓到的邮件写回库，造成"幽灵邮件"永久残留（v1.10.2 审查修复）。
+            # 上限 10s：正常 IDLE/轮询线程 2s 内退出，最坏是卡在建连超时。
+            client.join_gracefully(timeout=10)
 
     def restart_account(self, acc: Account):
         self.start_account(acc)

@@ -101,6 +101,11 @@ class MailClient:
         """请求立即收信一次（打断 IDLE 等待/轮询睡眠）。"""
         self._wake.set()
 
+    def join_gracefully(self, timeout: float = 10):
+        """等待收信线程退出（有界）。配合 stop() 保证停后不再写库。"""
+        if self._thread is not None and self._thread is not threading.current_thread():
+            self._thread.join(timeout=timeout)
+
     @property
     def stopped(self) -> bool:
         return self._stop.is_set()
@@ -113,6 +118,10 @@ class MailClient:
             try:
                 conn = self._connect()
                 self._conn = conn
+                if self._stop.is_set():
+                    # stop 可能发生在线程卡 _connect 期间（此时 stop 关不到
+                    # socket）：连接成功后先查一次，绝不在停止后继续收信
+                    break
                 self._status("已连接")
                 backoff = _RECONNECT_BASE
                 if self._probe_idle(conn):
@@ -200,7 +209,9 @@ class MailClient:
         typ, _data = conn.select(self._folder_wire(), readonly=True)
         if typ != "OK":
             raise imaplib.IMAP4.error(f"SELECT {self._folder()} failed")
-        # 启动即全量对账一次（补收离线期间的邮件）
+        # 启动即全量对账一次（补收离线期间的邮件）；停止后绝不入库
+        if self._stop.is_set():
+            return
         self._fetch_new(conn)
 
         while not self._stop.is_set():

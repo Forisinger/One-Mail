@@ -184,9 +184,9 @@ class AccountDialog(tk.Toplevel):
             # OAuth2 域名直接用官方服务器预置（guess_host 对 outlook 系会猜错）
             email_addr = self.var_email.get().strip()
             domain = email_addr.rsplit("@", 1)[-1].lower()
-            for d, (_provider, smtp_host, smtp_port) in OAUTH_DOMAINS.items():
+            for d, (provider, _smtp_host, _smtp_port) in OAUTH_DOMAINS.items():
                 if domain == d or domain.endswith("." + d):
-                    self.var_host.set("imap.gmail.com" if _provider == "google"
+                    self.var_host.set("imap.gmail.com" if provider == "google"
                                       else "outlook.office365.com")
                     if not self.var_port.get().strip() or self.var_port.get() == "993":
                         self.var_port.set("993")
@@ -270,9 +270,10 @@ class AccountDialog(tk.Toplevel):
             messagebox.showwarning(i18n.t("一邮通"), i18n.t("请填写正确的邮箱地址"), parent=self)
             return
         if not host:
-            host, port = Account.guess_host(email_addr)
+            host, guess_port = Account.guess_host(email_addr)
         try:
-            port = int(self.var_port.get().strip() or 993)
+            # 端口留空才采用 guess_host 的预置端口（原先被无条件覆盖成死赋值）
+            port = int(self.var_port.get().strip() or guess_port or 993)
         except ValueError:
             messagebox.showwarning(i18n.t("一邮通"), i18n.t("端口必须是数字"), parent=self)
             return
