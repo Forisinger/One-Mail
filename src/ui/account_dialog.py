@@ -269,11 +269,11 @@ class AccountDialog(tk.Toplevel):
         if "@" not in email_addr:
             messagebox.showwarning(i18n.t("一邮通"), i18n.t("请填写正确的邮箱地址"), parent=self)
             return
+        guess_port = 993   # 端口留空且未走 guess_host 路径时的兜底（终审修复 NameError）
         if not host:
             host, guess_port = Account.guess_host(email_addr)
         try:
-            # 端口留空才采用 guess_host 的预置端口（原先被无条件覆盖成死赋值）
-            port = int(self.var_port.get().strip() or guess_port or 993)
+            port = int(self.var_port.get().strip() or guess_port)
         except ValueError:
             messagebox.showwarning(i18n.t("一邮通"), i18n.t("端口必须是数字"), parent=self)
             return

@@ -66,11 +66,11 @@ class Scheduler:
         client = self._clients.pop(account_id, None)
         if client is not None:
             client.stop()
-            # 有界 join：确保线程真正退出后再返回。否则删账户场景里，
-            # 还卡在 _connect 的线程会在 delete_account_mails 之后把
-            # 抓到的邮件写回库，造成"幽灵邮件"永久残留（v1.10.2 审查修复）。
-            # 上限 10s：正常 IDLE/轮询线程 2s 内退出，最坏是卡在建连超时。
-            client.join_gracefully(timeout=10)
+            # 有界 join：正常 IDLE/轮询线程 ≤2s（select 分片）退出；卡在
+            # _connect 的线程 join 不等满——幽灵邮件防线由 mail_client 在
+            # 连接成功/对账/入库前的 stop 复查兜底，这里只是加速回收。
+            # 上限取小值防 UI 冻结（stop_account 在 UI 线程调用）。
+            client.join_gracefully(timeout=3)
 
     def restart_account(self, acc: Account):
         self.start_account(acc)
