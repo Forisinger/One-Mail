@@ -13,9 +13,6 @@ from tkinter import ttk, messagebox
 from core.account import Account, AccountManager, OAUTH_DOMAINS, oauth_provider_for
 from . import i18n
 
-_AUTH_LABELS = (i18n.t("授权码 / 密码"), i18n.t("OAuth2（Gmail / Outlook）"))
-_AUTH_BY_LABEL = {_AUTH_LABELS[0]: "password", _AUTH_LABELS[1]: "oauth2"}
-
 
 class AccountDialog(tk.Toplevel):
     """录入：显示名 / 邮箱 / 密码 / IMAP 服务器 / 端口 / SSL / 认证方式。
@@ -58,8 +55,14 @@ class AccountDialog(tk.Toplevel):
         folder = account.folder if account else "INBOX"
         self.var_folder = tk.StringVar(value=folder or "INBOX")
         init_auth = getattr(account, "auth_type", "password") or "password"
+        # 认证方式标签必须在 i18n.init() 之后求值（模块级会在导入时冻结成中文）
+        self._auth_labels = (i18n.t("授权码 / 密码"),
+                             i18n.t("OAuth2（Gmail / Outlook）"))
+        self._auth_by_label = {self._auth_labels[0]: "password",
+                               self._auth_labels[1]: "oauth2"}
         self.var_auth = tk.StringVar(
-            value=_AUTH_LABELS[1] if init_auth == "oauth2" else _AUTH_LABELS[0])
+            value=self._auth_labels[1] if init_auth == "oauth2"
+            else self._auth_labels[0])
         self.var_client_id = tk.StringVar(value=getattr(account, "client_id", "") or "")
         # Client Secret 存在 DPAPI（v1.10.1）：编辑时回填已存值，保存才不会被误清
         _stored_secret = ""
@@ -73,7 +76,7 @@ class AccountDialog(tk.Toplevel):
         w1 = row(i18n.t("邮箱地址："), lambda: ttk.Entry(frm, textvariable=self.var_email, width=30))
         wA = row(i18n.t("认证方式："), lambda: ttk.Combobox(
             frm, textvariable=self.var_auth, state="readonly", width=28,
-            values=list(_AUTH_LABELS)))
+            values=list(self._auth_labels)))
         self.var_auth.trace_add("write", lambda *_: self._auth_touched())
         self._w_pass = row(i18n.t("密码/授权码："), lambda: ttk.Entry(
             frm, textvariable=self.var_pass, width=30, show="*"))
@@ -125,7 +128,7 @@ class AccountDialog(tk.Toplevel):
     # ---------- 认证方式联动 ----------
 
     def _is_oauth(self) -> bool:
-        return _AUTH_BY_LABEL.get(self.var_auth.get()) == "oauth2"
+        return self._auth_by_label.get(self.var_auth.get()) == "oauth2"
 
     def _auth_touched(self):
         """OAuth2 时隐藏密码行（凭据走令牌），密码账户隐藏 OAuth2 行。"""
@@ -237,7 +240,8 @@ class AccountDialog(tk.Toplevel):
                 return
             self._dialog_after(lambda: (
                 self.cmb_folder.configure(values=folders),
-                self.lbl_folder_tip.configure(text=f"共 {len(folders)} 个文件夹"),
+                self.lbl_folder_tip.configure(
+                    text=i18n.t("共 {n} 个文件夹").format(n=len(folders))),
             ))
 
         self.lbl_folder_tip.configure(text=i18n.t("正在连接…"))
@@ -287,6 +291,9 @@ class AccountDialog(tk.Toplevel):
             # Client Secret 与令牌同级敏感：存 DPAPI，不随 Account 进 config.json
             save_client_secret(email_addr, self.var_client_secret.get().strip())
             password = ""          # OAuth2 账户无密码，凭据在令牌里
+            if self.account:       # 转换前的旧授权码一并清除（安全卫生）
+                from core import security
+                security.delete_password(self.account.id)
         else:
             if not password and self.account is None:
                 messagebox.showwarning(i18n.t("一邮通"), i18n.t("请填写密码或授权码"), parent=self)

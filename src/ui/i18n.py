@@ -108,8 +108,7 @@ _EN = {
     "已请求 {n} 个账户立即收信": "Requested fetch for {n} account(s)",
     "收信已暂停": "Fetching paused",
     "收信已恢复": "Fetching resumed",
-    "已读状态同步到服务器：已开启": "Read-state sync to server: ON",
-    "已读状态同步到服务器：已关闭": "Read-state sync to server: OFF",
+    "已读状态同步到服务器：{state}": "Read-state sync to server: {state}",
     "已开启": "ON",
     "已关闭": "OFF",
     "[{name}] 收到 {n} 封新邮件": "[{name}] {n} new mail(s)",
@@ -188,6 +187,8 @@ _EN = {
     "（已保存，留空沿用）": "(saved; leave empty to keep)",
     "保存失败：{err}": "Save failed: {err}",
     "打开日志文件夹": "Open Log Folder",
+    "（无主题）": "(no subject)",
+    "（{n} 封）": "({n})",
     # ---- 设置对话框 ----
     "设置": "Settings",
     "语言（重启生效）": "Language (restart to apply)",

@@ -26,6 +26,8 @@ _HEADING = {"h1": 4, "h2": 3, "h3": 2, "h4": 1, "h5": 1, "h6": 1}
 _COLOR_RE = re.compile(r"(?i)(?:^|;)\s*color\s*:\s*([#\w]+)")
 _LIST_PREFIX = {  # 列表项前缀由 li 开始时决定
     "ul": "• ", "ol": "", "": "• "}
+# CJK 字符（空白折叠时两侧均为 CJK 则不加空格，v1.10.1）
+_CJK_RE = re.compile(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af\u3000-\u303f\uff01-\uff5e]")
 
 
 class _Style:
@@ -60,6 +62,7 @@ class _Renderer(HTMLParser):
         self.skip: list[str] = []
         self._tag_no = 0
         self._list_stack: list[str] = []
+        self._ol_counters: list[int] = []   # 与 _list_stack 对齐，ol 序号计数
         # v1.10.0：img 占位登记 [(标签名, src)]，图片由 imgload 后台加载回填
         self.images: list[tuple[str, str]] = []
         self.w.tag_configure("imgph", foreground=colors.get("GRAY", "#888888"))
@@ -107,8 +110,15 @@ class _Renderer(HTMLParser):
             self.w.insert("end", "\n")
         if tag in ("ul", "ol"):
             self._list_stack.append(tag)
+            self._ol_counters.append(0 if tag == "ol" else -1)
         elif tag == "li" and self._list_stack:
-            self.w.insert("end", _LIST_PREFIX.get(self._list_stack[-1], "• "))
+            kind = self._list_stack[-1]
+            if kind == "ol":
+                self._ol_counters[-1] += 1
+                self.w.insert("end", f"{self._ol_counters[-1]}. ",
+                              self._tags_for(self.style))
+            else:
+                self.w.insert("end", _LIST_PREFIX.get(kind, "• "))
 
         old = self.style
         a = dict(attrs)
@@ -150,6 +160,8 @@ class _Renderer(HTMLParser):
             return
         if tag in ("ul", "ol") and self._list_stack:
             self._list_stack.pop()
+            if self._ol_counters:
+                self._ol_counters.pop()
         # 栈式恢复：找到最近的同名开始标签，弹到它为止（未闭合标签自动收敛）
         for k in range(len(self.stack) - 1, -1, -1):
             if self.stack[k][0] == tag:
@@ -163,7 +175,15 @@ class _Renderer(HTMLParser):
         if self.stack and self.stack[-1][0] == "pre":
             text = data
         else:
-            text = re.sub(r"\s+", " ", data)
+            # 空白折叠：CJK 两侧的换行直接去掉不加空格（中文邮件源码常折行，
+            # 折叠成空格会凭空多出空格，v1.10.1）
+            def _fold(m):
+                prev = data[m.start() - 1] if m.start() > 0 else ""
+                nxt = data[m.end()] if m.end() < len(data) else ""
+                if _CJK_RE.match(prev) and _CJK_RE.match(nxt):
+                    return ""
+                return " "
+            text = re.sub(r"\s+", _fold, data)
             if not text.strip():
                 return  # 纯空白（缩进/换行）不插入，排版由块级标签负责
         self.w.insert("end", text, self._tags_for(self.style))

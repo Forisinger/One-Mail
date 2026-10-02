@@ -154,7 +154,7 @@ class App:
             title = i18n.t("一邮通 · {name}").format(name=account.name)
             msg = f"{first['from_name'] or first['from_addr']}\n{first['subject']}"
             if len(mails) > 1:
-                msg += f"（{len(mails)}）"
+                msg += i18n.t("（{n} 封）").format(n=len(mails))
             notify_send(self.tray.icon, title, msg)
             self.window.set_status(
                 i18n.t("[{name}] 收到 {n} 封新邮件").format(

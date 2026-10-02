@@ -191,7 +191,11 @@ def _extract_body(msg) -> tuple[str, str, list[str]]:
             text = text.text()
         except Exception:
             text = body_html
-    return text.strip()[:_MAX_BODY], body_html[:_MAX_BODY_HTML], attachments
+    if len(body_html) > _MAX_BODY_HTML:
+        # 截断点回退到最近的标签闭合符，避免截出 <img s 之类的裸文本碎片
+        cut = body_html.rfind(">", 0, _MAX_BODY_HTML)
+        body_html = body_html[:cut + 1] if cut > 0 else body_html[:_MAX_BODY_HTML]
+    return text.strip()[:_MAX_BODY], body_html, attachments
 
 
 def parse_raw(raw: bytes) -> ParsedMail:

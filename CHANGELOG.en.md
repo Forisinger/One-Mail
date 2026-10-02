@@ -4,6 +4,17 @@ All notable changes to **OneMail** are documented here. (中文版见 [CHANGELOG
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.10.2] — 2026-10-02
+
+Second multi-agent review round: rendering & credential hygiene.
+
+### Fixed
+
+- Rich text: mails with unclosed <script>/<style> no longer lose their whole body (falls back to plain text when the render is empty); <ol> renders numbers; CJK line breaks in HTML source no longer gain stray spaces; body_html 128KB truncation now lands on tag boundaries
+- SMTP: a successful send is no longer misreported as failed by a QUIT teardown error (prevents duplicate re-sends)
+- Security: switching a password account to OAuth2 deletes the old auth code; editing an account re-fills the Client Secret from DPAPI instead of wiping it
+- i18n: filled missing English keys (auth-method dropdown, folder count, no-subject placeholder, notify count, sync status), removed 3 dead keys
+
 ## [1.10.1] — 2026-10-02
 
 Multi-agent review round: 12 hardening fixes for OAuth2 & image modules + 4 UX improvements.

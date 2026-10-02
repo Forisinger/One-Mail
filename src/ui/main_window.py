@@ -594,7 +594,7 @@ class MainWindow:
         self._current_mail = mail
         self.txt_body.configure(state="normal")
         self.txt_body.delete("1.0", "end")
-        self.txt_body.insert("end", mail["subject"] or "(无主题)", "subject")
+        self.txt_body.insert("end", mail["subject"] or i18n.t("（无主题）"), "subject")
         self.txt_body.insert("end", "\n")
         self.txt_body.insert("end",
                              i18n.t("来自 {name} <{addr}>　·　{date}　·　来源：{acc}")
@@ -612,8 +612,16 @@ class MainWindow:
         self._img_gen = getattr(self, "_img_gen", 0) + 1
         if body_html:
             # HTML 富文本渲染（v1.10.0）：图片占位 → 异步加载回填
+            self.txt_body.mark_set("renderstart", "end-1c")
             images = render_html(self.txt_body, body_html, FONT_UI, self.C)
             self.txt_body.configure(state="disabled")
+            # 未闭合 <script>/<style> 会让渲染器丢弃尾部甚至全部内容：
+            # 渲染结果为空且有纯文本兜底时回退（v1.10.1 审查修复）
+            if not self.txt_body.get("renderstart", "end-1c").strip() \
+                    and (mail["body_text"] or "").strip():
+                self.txt_body.configure(state="normal")
+                self.txt_body.insert("end", mail["body_text"], "body")
+                self.txt_body.configure(state="disabled")
             if images:
                 self._load_mail_images(mail["id"], images)
         else:
@@ -655,8 +663,11 @@ class MainWindow:
                         cmap = imgload.cid_map_from_raw(
                             MailClient.fetch_raw(acc, pwd, folder, uid))
                         cache = getattr(self, "_cid_cache", {})
-                        if len(cache) > 20:
-                            cache.clear()      # 有界防涨
+                        # 按字节总量限界：图片字节常驻内存，防托盘长年运行膨胀
+                        total = sum(len(v) for m in cache.values() for v in m.values())
+                        while cache and total + sum(len(v) for v in cmap.values()) > 64 * 1024 * 1024:
+                            total -= sum(len(v) for v in next(iter(cache.values())).values())
+                            cache.pop(next(iter(cache)))
                         cache[mail_id] = cmap
                         self._cid_cache = cache
                     except Exception:
@@ -863,7 +874,7 @@ class MainWindow:
 
     @staticmethod
     def _safe_name(name: str) -> str:
-        safe = os.path.basename(name.replace("\\", "_").replace("/", "_")) or "附件"
+        safe = os.path.basename(name.replace("\\", "_").replace("/", "_")) or i18n.t("附件")
         reserved = {"CON", "PRN", "AUX", "NUL"} | {
             f"{p}{i}" for p in ("COM", "LPT") for i in range(1, 10)}
         if os.path.splitext(safe)[0].upper() in reserved:

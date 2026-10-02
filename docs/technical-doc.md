@@ -263,6 +263,8 @@ CREATE INDEX idx_mails_account ON mails(account_id, received_at DESC);
 - Reuses the on-demand raw-fetch channel: background thread `fetch_raw` → `extract_attachments` → write to `%TEMP%/OneMail/<mail_id>/` → `os.startfile`; temp files are reused per mail (no re-download)
 - "Save As" uses `asksaveasfilename` (default name = attachment name); Windows reserved device names (CON/NUL/…) are sanitized
 
+> **v1.10.1 hardening (same day)**: SMTP cert verification + no socket leak on STARTTLS failure; token margin clamped by lifetime; unknown provider raises; Client Secret moved to DPAPI; image decode off the main thread with a 12 MP cap; plain-text fallback when an unclosed script/style empties the render; ol numbering; CJK line-break folding without spaces; body_html truncated at tag boundaries; explicit re-login guidance with max backoff for revoked tokens.
+
 ### 23. OAuth2 sign-in (v1.10.0, oauth2.py)
 
 - **Flow**: authorization code + PKCE(S256) → loopback callback (127.0.0.1 random port, http.server per-request handling with a 1s poll timeout, 5 min total) → browser consent → token exchange. Gmail scope `https://mail.google.com/`; Microsoft uses `/common/oauth2/v2.0` endpoints with scopes `offline_access + IMAP.AccessAsUser.All + SMTP.Send` (outlook.office.com resource, not Graph)

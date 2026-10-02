@@ -133,8 +133,19 @@ def send_mail(account: Account, password: str, to_addrs: list[str],
     msg = build_mime(account, to_addrs, subject, body, attachments,
                      cc_addrs=cc_addrs, bcc_addrs=bcc_addrs, html_body=html_body)
     envelope = list(to_addrs) + list(cc_addrs or []) + list(bcc_addrs or [])
-    with smtp_connect_and_login(account, password, timeout) as srv:
+    srv = smtp_connect_and_login(account, password, timeout)
+    try:
         srv.send_message(msg, to_addrs=envelope)
+    finally:
+        # send_message 成功即视为发送成功：QUIT 的收尾异常（部分服务器
+        # DATA 后立即收尾会回非 221）不能把成功误报成失败（v1.10.1 审查修复）
+        try:
+            srv.quit()
+        except Exception:
+            try:
+                srv.close()
+            except Exception:
+                pass
     return msg
 
 
