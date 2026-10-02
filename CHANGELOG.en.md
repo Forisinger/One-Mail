@@ -4,6 +4,14 @@ All notable changes to **OneMail** are documented here. (中文版见 [CHANGELOG
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.10.4] — 2026-10-02
+
+Fifth review round: status visibility & error messages.
+
+### Added
+
+- Error-state accounts highlighted in red in the account panel (new ERR color for both themes)
+- Common network errors translated to plain language (DNS failure / timeout / refused / SSL)
 ## [1.10.3] — 2026-10-02
 
 Fourth multi-agent review round: lifecycle & single-instance.

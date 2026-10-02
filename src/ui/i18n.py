@@ -189,6 +189,13 @@ _EN = {
     "打开日志文件夹": "Open Log Folder",
     "（无主题）": "(no subject)",
     "（{n} 封）": "({n})",
+    # ---- 错误提示人话化（v1.10.2） ----
+    "无法解析服务器地址（请检查网络或服务器名）":
+        "Cannot resolve server address (check network or server name)",
+    "连接超时（请检查网络）": "Connection timed out (check your network)",
+    "连接被拒绝（服务器未开放该服务）":
+        "Connection refused (service not enabled on the server)",
+    "SSL 证书校验失败": "SSL certificate verification failed",
     # ---- 设置对话框 ----
     "设置": "Settings",
     "语言（重启生效）": "Language (restart to apply)",

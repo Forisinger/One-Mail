@@ -377,7 +377,8 @@ class MainWindow:
 
         def _add_row(label: str, account_id: str | None, unread: int,
                      sub: str = "", selected: bool = False,
-                     text_color: str | None = None):
+                     text_color: str | None = None,
+                     sub_color: str | None = None):
             row = tk.Frame(self.account_list_frame,
                            bg=self.C["ACCENT_SOFT"] if selected else self.C["CARD"],
                            cursor="hand2")
@@ -389,7 +390,8 @@ class MainWindow:
                      font=FONT_UI_B if unread else FONT_UI,
                      anchor="w").pack(side="left", fill="x", expand=True)
             if sub:
-                tk.Label(inner_l, text=sub, bg=row["bg"], fg=self.C["GRAY"],
+                tk.Label(inner_l, text=sub, bg=row["bg"],
+                         fg=sub_color or self.C["GRAY"],
                          font=("Microsoft YaHei UI", 8),
                          anchor="w").pack(side="left", fill="x")
             if unread:
@@ -415,7 +417,12 @@ class MainWindow:
             state = "" if acc.enabled else i18n.t("（已停用）")
             status = self._account_status.get(acc.id, "")
             sub = acc.email + (f"　·　{status}" if status else "")
-            _add_row(acc.name + state, acc.id, n, sub=sub)
+            if self._is_error_status(status):
+                # 异常账户红色高亮，多账户时一眼定位（v1.10.2）
+                _add_row(acc.name + state, acc.id, n, sub=sub,
+                         sub_color=self.C["ERR"])
+            else:
+                _add_row(acc.name + state, acc.id, n, sub=sub)
 
         # ---- 本地文件夹分区（v1.9.0） ----
         counts = db.local_folder_counts()
@@ -539,6 +546,30 @@ class MainWindow:
             return dt.strftime("%Y-%m-%d")
         except (ValueError, TypeError):
             return iso[:16]
+
+    @staticmethod
+    def _is_error_status(text: str) -> bool:
+        """账户状态是否为异常（红色高亮用，v1.10.2）。"""
+        return any(k in (text or "") for k in
+                   ("异常", "失败", "重新登录", "已失效", "未设置密码"))
+
+    @staticmethod
+    def _friendly_error(e) -> str:
+        """常见网络异常 → 人话（未命中回退原格式，v1.10.2）。"""
+        import socket as _socket
+        s = str(e)
+        low = s.lower()
+        if isinstance(e, _socket.gaierror) or "getaddrinfo" in low \
+                or "name or service" in low:
+            return i18n.t("无法解析服务器地址（请检查网络或服务器名）")
+        if isinstance(e, _socket.timeout) or "timed out" in low \
+                or "timeout" in low:
+            return i18n.t("连接超时（请检查网络）")
+        if "refused" in low:
+            return i18n.t("连接被拒绝（服务器未开放该服务）")
+        if "certificate" in low or "ssl" in low:
+            return i18n.t("SSL 证书校验失败")
+        return f"{type(e).__name__}: {e}"
 
     def refresh_mails(self):
         """按账户 + 本地文件夹 + 过滤器 + 关键字组合查询（搜索下沉 SQL）。"""
@@ -865,7 +896,7 @@ class MainWindow:
                 atts = extract_attachments(raw)
                 self.root.after(0, lambda: done(atts))
             except Exception as e:
-                err = f"{type(e).__name__}: {e}"
+                err = self._friendly_error(e)
                 self.root.after(0, lambda: self.var_status.set(
                     i18n.t("附件保存失败：{err}").format(err=err)))
 

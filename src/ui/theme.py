@@ -17,6 +17,7 @@ THEMES: dict[str, dict[str, str]] = {
         "ACCENT": "#1e64dc",      # 主蓝
         "ACCENT_DARK": "#173f8f", # 未读文字
         "ACCENT_SOFT": "#e3ecfb", # 选中底色
+        "ERR": "#cc3333",        # 异常账户/错误提示
         "ROW_ALT": "#f4f7fc",     # 隔行底色
         "DIVIDER": "#e2e8f2",
         "HEADING": "#e8edf6",     # 表头底色
@@ -31,6 +32,7 @@ THEMES: dict[str, dict[str, str]] = {
         "ACCENT": "#4d8dff",
         "ACCENT_DARK": "#a8c7ff",  # 深底下未读文字要亮
         "ACCENT_SOFT": "#2c3a55",
+        "ERR": "#ff7b72",        # 异常账户/错误提示（深色版）
         "ROW_ALT": "#272c35",
         "DIVIDER": "#3a4150",
         "HEADING": "#2d333d",
