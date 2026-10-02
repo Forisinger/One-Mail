@@ -13,6 +13,7 @@ import mimetypes
 import os
 import re
 import smtplib
+import ssl as _ssl
 from email.header import Header
 from email.message import Message
 from email.mime.application import MIMEApplication
@@ -31,30 +32,39 @@ def smtp_connect_and_login(account: Account, password: str, timeout: float):
     """建立 SMTP 连接并按账户认证方式登录（v1.10.0）。
 
     - 端口 465 → SSL；其余端口（如 Outlook 的 587）→ 明文连 + STARTTLS
+    - 两种路径都显式校验服务器证书（默认上下文，v1.10.1 审查修复）
     - OAuth2 账户走 raw AUTH XOAUTH2；密码账户维持原 smtplib.login
+    - 任何建连/TLS 失败路径都保证 close（v1.10.1 审查修复 socket 泄漏）
     """
     import smtplib as _smtplib
     host, port = account.smtp_endpoint()
-    if port == 465:
-        srv = _smtplib.SMTP_SSL(host, port, timeout=timeout)
-    else:
-        srv = _smtplib.SMTP(host, port, timeout=timeout)
-        srv.ehlo()
-        srv.starttls()
-        srv.ehlo()
+    ctx = _ssl.create_default_context()
+    srv = None
     try:
+        if port == 465:
+            srv = _smtplib.SMTP_SSL(host, port, timeout=timeout, context=ctx)
+        else:
+            srv = _smtplib.SMTP(host, port, timeout=timeout)
+            srv.ehlo()
+            srv.starttls(context=ctx)
+            srv.ehlo()
         if getattr(account, "auth_type", "password") == "oauth2":
             from .oauth2 import OAuth2Error, get_access_token, smtp_auth
             try:
                 smtp_auth(srv, account, get_access_token(account))
             except OAuth2Error as e:
-                raise _smtplib.SMTPAuthenticationError(334, f"OAuth2: {e}".encode())
+                # 不伪造 334（那是服务器挑战码）：用 SMTPException 承载文案
+                raise _smtplib.SMTPException(f"OAuth2: {e}") from e
         else:
             srv.login(account.email, password)
+        return srv
     except Exception:
-        srv.close()
+        if srv is not None:
+            try:
+                srv.close()
+            except Exception:
+                pass
         raise
-    return srv
 
 
 def build_mime(account: Account, to_addrs: list[str], subject: str,

@@ -182,6 +182,12 @@ _EN = {
         "Note: Chinese providers use an auth code; for Gmail/Outlook pick OAuth2 and register an app in Google Cloud / Azure to get a Client ID.",
     # ---- 图片（v1.10.0） ----
     "已加载 {n} 张邮件图片": "Loaded {n} mail image(s)",
+    # ---- v1.10.1 增强 ----
+    "OAuth2 令牌已失效，请编辑账户重新登录":
+        "OAuth2 token expired/revoked — edit the account to sign in again",
+    "（已保存，留空沿用）": "(saved; leave empty to keep)",
+    "保存失败：{err}": "Save failed: {err}",
+    "打开日志文件夹": "Open Log Folder",
     # ---- 设置对话框 ----
     "设置": "Settings",
     "语言（重启生效）": "Language (restart to apply)",

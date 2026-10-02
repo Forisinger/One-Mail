@@ -8,6 +8,8 @@
 """
 from __future__ import annotations
 
+import os
+
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -90,8 +92,8 @@ class SettingsDialog(tk.Toplevel):
         ent.grid(row=r, column=1, sticky="we", pady=6)
         if security.load_password("__ai__"):
             ttk.Label(frm, foreground="#888",
-                      text="（已保存，留空沿用）").grid(row=r, column=2,
-                                                     padx=(4, 0))
+                      text=i18n.t("（已保存，留空沿用）")).grid(row=r, column=2,
+                                                              padx=(4, 0))
 
         r += 1
         ttk.Label(frm, foreground="#888",
@@ -106,10 +108,20 @@ class SettingsDialog(tk.Toplevel):
 
         btns = ttk.Frame(self)
         btns.pack(fill="x", padx=14, pady=(0, 10))
+        # 打开数据/日志文件夹：onemail.log 是排障唯一入口，给用户自助路径
+        ttk.Button(btns, text=i18n.t("打开日志文件夹"),
+                   command=self._open_data_dir).pack(side="left")
         ttk.Button(btns, text=i18n.t("取消"),
                    command=self.destroy).pack(side="right", padx=4)
         ttk.Button(btns, text=i18n.t("保存"),
                    command=self._save).pack(side="right")
+
+    def _open_data_dir(self):
+        from storage.config import data_dir
+        try:
+            os.startfile(data_dir())   # noqa: S606 Windows 专属项目
+        except Exception:
+            pass
 
     def _save(self):
         try:
@@ -127,7 +139,9 @@ class SettingsDialog(tk.Toplevel):
                 security.save_password("__ai__", key)
             config_store.save(cfg)
         except Exception as e:
-            messagebox.showerror(i18n.t("一邮通"), repr(e), parent=self)
+            messagebox.showerror(i18n.t("一邮通"),
+                                 i18n.t("保存失败：{err}").format(err=e),
+                                 parent=self)
             return
         messagebox.showinfo(i18n.t("一邮通"),
                             i18n.t("设置已保存，语言/主题重启后生效。"),

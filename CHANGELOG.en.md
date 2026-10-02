@@ -4,6 +4,25 @@ All notable changes to **OneMail** are documented here. (中文版见 [CHANGELOG
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.10.1] — 2026-10-02
+
+Multi-agent review round: 12 hardening fixes for OAuth2 & image modules + 4 UX improvements.
+
+### Fixed
+
+- SMTP: socket leak on STARTTLS handshake failure; explicit certificate verification on both 465 and 587 paths; OAuth2 errors no longer fake a 334 response code
+- OAuth2: token expiry margin clamped by lifetime (short-lived tokens no longer refresh on every connection); corrupt expires_at treated as expired instead of raising; unknown provider raises a clear error (no more sending Google tokens to Microsoft); no stray CRLF after a failed IMAP XOAUTH2 exchange
+- Security: Client Secret now DPAPI-encrypted (was plaintext in config.json via the Account); editing an account no longer wipes the stored secret
+- Images: PIL decode moved off the main thread + 12 MP pixel cap (huge images no longer freeze the UI); reading-pane read-only state restored in a finally; WebP magic added; data URIs accept URL-safe base64; duplicate method definition removed; single source for the image-count limit
+- Threading discipline: all tk variables captured before starting background threads in the account dialog
+
+### Added
+
+- Expired/revoked OAuth2 tokens now show an explicit "sign in again" status and back off immediately instead of retrying forever
+- Friendly mail-list dates: time-only today, month-day+time this year, full date across years
+- Enter opens the selected mail; Esc clears the search box
+- "Open Log Folder" in the settings dialog; AI-key hint and save-failure text now localized
+
 ## [1.10.0] — 2026-10-02
 
 Gmail/Outlook OAuth2 sign-in, mail image display, top-left settings entry, right-click new folder in the mail list.

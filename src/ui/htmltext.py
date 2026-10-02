@@ -16,6 +16,8 @@ from html.parser import HTMLParser
 
 import tkinter as tk
 
+from .imgload import MAX_IMAGES   # 占位登记上限与后台加载共用一份定义
+
 # 产生换行的块级标签
 _BLOCK = {"p", "div", "tr", "table", "ul", "ol", "blockquote", "section",
           "h1", "h2", "h3", "h4", "h5", "h6", "li", "pre"}
@@ -166,16 +168,12 @@ class _Renderer(HTMLParser):
                 return  # 纯空白（缩进/换行）不插入，排版由块级标签负责
         self.w.insert("end", text, self._tags_for(self.style))
 
-    def handle_startendtag(self, tag, attrs):
-        if tag == "br" and not self.skip:
-            self.w.insert("end", "\n")
-
     # ---------- 图片（v1.10.0）：插占位符并登记，交给 imgload 异步回填 ----------
     def _handle_img(self, attrs: dict):
         src = (attrs.get("src") or "").strip()
         if not src:
             return
-        if len(self.images) >= 10:      # 与 imgload.MAX_IMAGES 一致，防巨量占位
+        if len(self.images) >= MAX_IMAGES:   # 与后台加载上限同源
             return
         name = f"img{self._tag_no}"
         self._tag_no += 1
@@ -185,8 +183,7 @@ class _Renderer(HTMLParser):
         self.images.append((name, src))
 
     def handle_startendtag(self, tag, attrs):
-        # 自闭合写法 <img/> <br/>：默认实现会走 starttag+endtag，
-        # 但这里 img 需要单独路径，br 需要换行，其余块级标签不用管
+        # 自闭合写法 <img/> <br/>：img 需要单独路径，br 需要换行
         if tag in _SKIP:
             return
         if self.skip:
@@ -195,6 +192,9 @@ class _Renderer(HTMLParser):
             self.w.insert("end", "\n")
         elif tag == "img":
             self._handle_img(dict(attrs))
+
+    def handle_decl(self, decl):
+        pass
 
 
 def render_html(widget: tk.Text, html: str, base_font, colors: dict[str, str]) -> list:

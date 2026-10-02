@@ -229,3 +229,58 @@ class AccountPresets(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReviewFixRegression(unittest.TestCase):
+    """v1.10.1 审查修复的回归测试。"""
+
+    def test_webp_magic(self):
+        # RIFF....WEBP 头（内容无所谓，只测魔数）
+        webp = b"RIFF\x00\x00\x00\x00WEBPVP8 "
+        self.assertTrue(imgload.valid_image(webp))
+        self.assertFalse(imgload.valid_image(b"RIFF\x00\x00\x00\x00WAVEfmt "))
+
+    def test_data_uri_urlsafe_b64(self):
+        # URL-safe 变体（-_）也能解（审查修复前会静默丢字符）
+        import base64 as b64mod
+        png = imgload.valid_image and imgload.decode and None  # noqa
+        data = b"\x89PNG\r\n\x1a\n" + b"x" * 16
+        b64 = b64mod.b64encode(data).decode().replace("+", "-").replace("/", "_")
+        got = imgload.data_b64_from_src("data:image/png;base64," + b64)
+        self.assertTrue(got and imgload.valid_image(got))
+
+    def test_token_expired_corrupt(self):
+        self.assertTrue(oauth2.token_expired({"expires_at": "not-a-number"}))
+        self.assertTrue(oauth2.token_expired({"expires_at": None}))
+
+    def test_short_expires_in_clamp(self):
+        # 短寿命令牌：存全额有效期，提前量按一半寿命钳制，
+        # 存完立刻不算过期（v1.10.1 修复"每次连接都刷新"）
+        d = oauth2.parse_token_response(json.dumps({
+            "access_token": "a", "refresh_token": "r", "expires_in": 100}).encode())
+        gap = d["expires_at"] - time.time()
+        self.assertTrue(60 <= gap <= 100, f"gap={gap}")
+        self.assertFalse(oauth2.token_expired(d))   # 刚签发不判过期
+        # 正常 3600 的令牌仍按 120s 提前量
+        d2 = oauth2.parse_token_response(json.dumps({
+            "access_token": "a", "refresh_token": "r", "expires_in": 3600}).encode())
+        self.assertFalse(oauth2.token_expired(d2))
+        self.assertTrue(oauth2.token_expired(
+            {"expires_at": time.time() + 60, "lifetime": 3600}))
+
+    def test_get_access_token_unknown_provider(self):
+        acc = Account(id="t2", name="t", email="w@x.com",
+                      imap_host="imap.x.com", auth_type="oauth2", client_id="c")
+        self.addCleanup(oauth2.delete_token, "w@x.com")
+        oauth2.save_token("w@x.com", {"access_token": "s", "refresh_token": "r",
+                                      "expires_at": time.time() - 10,
+                                      "provider": "nope"})
+        with self.assertRaises(oauth2.OAuth2Error):
+            oauth2.get_access_token(acc)
+
+    def test_client_secret_dpapi_roundtrip(self):
+        self.addCleanup(oauth2.save_client_secret, "s@x.com", "")
+        oauth2.save_client_secret("s@x.com", "sec-值")
+        self.assertEqual(oauth2.load_client_secret("s@x.com"), "sec-值")
+        oauth2.save_client_secret("s@x.com", "")
+        self.assertEqual(oauth2.load_client_secret("s@x.com"), "")

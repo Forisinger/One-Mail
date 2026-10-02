@@ -188,6 +188,7 @@ class MainWindow:
                          font=FONT_UI, width=22,
                          insertbackground=self.C["TEXT"])
         entry.pack(side="left", padx=(0, 8), pady=5)
+        entry.bind("<Escape>", lambda e: self._search_var.set(""))  # Esc 清空搜索
         # 搜索防抖：停顿 300ms 后才查库，避免每敲一个字符全表扫描
         self._search_job = None
         self._search_var.trace_add("write", self._on_search_changed)
@@ -252,6 +253,7 @@ class MainWindow:
         self.tree.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
         self.tree.bind("<Double-1>", self._on_mail_open)
+        self.tree.bind("<Return>", self._on_mail_open)   # 键盘用户也能打开邮件
         self.tree.bind("<Button-3>", self._mail_list_menu)
         self.tree.bind("<Delete>", lambda e: self.delete_selected_mail())
         # 行样式：未读加粗着色 + 隔行底色
@@ -521,6 +523,23 @@ class MainWindow:
         self.refresh_accounts()
         self.refresh_mails()
 
+    @staticmethod
+    def _friendly_date(iso: str) -> str:
+        """人性化时间列：今天只显时分，今年显月日+时分，跨年带年份。"""
+        if not iso:
+            return ""
+        try:
+            from datetime import datetime
+            dt = datetime.fromisoformat(iso)
+            today = datetime.now().date()
+            if dt.date() == today:
+                return dt.strftime("%H:%M")
+            if dt.date().year == today.year:
+                return dt.strftime("%m-%d %H:%M")
+            return dt.strftime("%Y-%m-%d")
+        except (ValueError, TypeError):
+            return iso[:16]
+
     def refresh_mails(self):
         """按账户 + 本地文件夹 + 过滤器 + 关键字组合查询（搜索下沉 SQL）。"""
         keyword = self._search_var.get().strip()
@@ -544,7 +563,7 @@ class MainWindow:
                 tags.append("odd")
             self.tree.insert("", "end", iid=str(row["id"]),
                              values=(acc_name, row["from_name"] or row["from_addr"],
-                                     subj, (row["received_at"] or "")[:16]),
+                                     subj, self._friendly_date(row["received_at"])),
                              tags=tuple(tags))
         filtered = len(rows)
         self.var_status.set(
@@ -605,8 +624,9 @@ class MainWindow:
     def _load_mail_images(self, mail_id: int, images):
         """后台线程加载邮件图片（v1.10.0）：CID 内嵌/远程 http/data:URI。
 
-        限制见 imgload（每张 3MB、最多 10 张、魔数校验）；网络全在后台线程，
-        PhotoImage 创建与 Text 插入回主线程。换邮件后到达的图片按代次丢弃。
+        限制见 imgload（每张 3MB、最多 10 张、魔数校验）；下载与 PIL 解码
+        全在后台线程，PhotoImage 创建与 Text 插入回主线程。
+        换邮件后到达的图片按代次丢弃（_img_gen）。
         """
         from . import imgload
         gen = self._img_gen
@@ -627,12 +647,20 @@ class MainWindow:
             nonlocal n_loaded
             cmap = {}
             if need_raw and acc is not None:
-                try:
-                    from core.mail_client import MailClient
-                    cmap = imgload.cid_map_from_raw(
-                        MailClient.fetch_raw(acc, pwd, folder, uid))
-                except Exception:
-                    cmap = {}
+                # 会话级缓存：来回切同一封邮件不重复 IMAP 拉整封原文
+                cmap = getattr(self, "_cid_cache", {}).get(mail_id)
+                if cmap is None:
+                    try:
+                        from core.mail_client import MailClient
+                        cmap = imgload.cid_map_from_raw(
+                            MailClient.fetch_raw(acc, pwd, folder, uid))
+                        cache = getattr(self, "_cid_cache", {})
+                        if len(cache) > 20:
+                            cache.clear()      # 有界防涨
+                        cache[mail_id] = cmap
+                        self._cid_cache = cache
+                    except Exception:
+                        cmap = {}
             for tag, src in images:
                 if self._img_gen != gen:      # 用户已切到别的邮件
                     return
@@ -647,23 +675,28 @@ class MainWindow:
                     continue
                 if not data:
                     continue
+                im = imgload.decode(data)     # 重活全在后台线程
+                if im is None:
+                    continue
 
-                def apply(tag=tag, data=data):
+                def apply(tag=tag, im=im):
+                    nonlocal n_loaded
                     if self._img_gen != gen:
                         return
                     try:
                         ranges = self.txt_body.tag_ranges(tag)
                         if not ranges:
                             return
-                        photo = imgload.to_photo(data)
+                        photo = imgload.photo_from(im)   # Tk 对象须主线程建
                         if photo is None:
                             return
                         self._photo_refs.append(photo)   # 防 GC
                         self.txt_body.configure(state="normal")
-                        self.txt_body.delete(ranges[0], ranges[1])
-                        self.txt_body.image_create(ranges[0], image=photo)
-                        self.txt_body.configure(state="disabled")
-                        nonlocal n_loaded
+                        try:
+                            self.txt_body.delete(ranges[0], ranges[1])
+                            self.txt_body.image_create(ranges[0], image=photo)
+                        finally:
+                            self.txt_body.configure(state="disabled")  # 成对回位
                         n_loaded += 1
                     except Exception:
                         pass

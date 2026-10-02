@@ -121,7 +121,15 @@ class MailClient:
                     self._status("服务器不支持 IDLE，转为轮询")
                     self._poll_loop(conn)
             except (imaplib.IMAP4.error, socket.error, OSError) as e:
-                self._status(f"连接异常：{type(e).__name__}: {e}，{backoff}s 后重连")
+                text = f"{type(e).__name__}: {e}"
+                # OAuth2 令牌失效（改密/吊销/长期闲置）：重试无意义，
+                # 顶格退避并给出明确引导（v1.10.1）
+                if "OAuth2" in text and ("重新登录" in text
+                                         or "invalid_grant" in text):
+                    self._status("OAuth2 令牌已失效，请编辑账户重新登录")
+                    backoff = _RECONNECT_MAX
+                else:
+                    self._status(f"连接异常：{text}，{backoff}s 后重连")
             except Exception:  # 未知异常也绝不退出线程
                 self._status("未知错误，稍后重连")
                 traceback.print_exc()

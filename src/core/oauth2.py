@@ -87,6 +87,23 @@ def delete_token(email: str) -> None:
     security.delete_password(_token_key(email))
 
 
+# Client Secret 与令牌同级敏感：同样走 DPAPI（v1.10.1 审查修复——
+# 之前随 Account 进 config.json 明文落盘）
+def _secret_key(email: str) -> str:
+    return "__oauth2client__::" + (email or "").strip().lower()
+
+
+def save_client_secret(email: str, secret: str) -> None:
+    if secret:
+        security.save_password(_secret_key(email), secret)
+    else:
+        security.delete_password(_secret_key(email))
+
+
+def load_client_secret(email: str) -> str:
+    return security.load_password(_secret_key(email))
+
+
 # ---------- PKCE / URL / 请求体（离线可测的纯函数） ----------
 
 def make_pkce() -> tuple[str, str]:
@@ -144,7 +161,10 @@ def parse_token_response(payload: bytes, old: dict | None = None) -> dict:
         expires_in = int(d.get("expires_in", 3600))
     except (TypeError, ValueError):
         expires_in = 3600
-    tok["expires_at"] = time.time() + max(expires_in - 30, 60)
+    # 存全额有效期（带 30s 网络折扣），提前量由 token_expired 按寿命钳制——
+    # 短寿命令牌不会被 120s 固定提前量判成"永远过期"（v1.10.1 审查修复）
+    tok["expires_at"] = time.time() + max(expires_in - 30, 1)
+    tok["lifetime"] = max(expires_in, 1)
     if not tok["access_token"] or not tok.get("refresh_token"):
         raise OAuth2Error("令牌响应缺少 access_token/refresh_token")
     return tok
@@ -152,7 +172,19 @@ def parse_token_response(payload: bytes, old: dict | None = None) -> dict:
 
 def token_expired(tok: dict, now: float | None = None) -> bool:
     now = time.time() if now is None else now
-    return now >= float(tok.get("expires_at", 0)) - _EXPIRY_MARGIN
+    try:
+        expires_at = float(tok.get("expires_at", 0))
+    except (TypeError, ValueError):
+        return True   # 字段损坏按过期处理，走刷新/报错通道（审查修复）
+    # 提前量按寿命钳制：正常 120s；短寿命令牌用一半寿命，防"每次连接都刷新"
+    margin = _EXPIRY_MARGIN
+    try:
+        lifetime = int(tok.get("lifetime", 0) or 0)
+        if lifetime > 0:
+            margin = min(margin, max(lifetime // 2, 0))
+    except (TypeError, ValueError):
+        pass
+    return now >= expires_at - margin
 
 
 # ---------- 网络端点 ----------
@@ -283,10 +315,15 @@ def get_access_token(account, now: float | None = None) -> str:
         if not token_expired(tok, now):
             return tok["access_token"]
         provider_name = tok.get("provider") or _guess_provider_name(email)
-        provider = PROVIDERS.get(provider_name, MICROSOFT)
+        # 宁可让用户重登，也不能把 Google 的 refresh_token 发去微软端点
+        # （v1.10.1 审查修复：原实现静默回退 MICROSOFT，用户永远看不到根因）
+        provider = PROVIDERS.get(provider_name)
+        if provider is None:
+            raise OAuth2Error("OAuth2 提供者未知，请在账户设置中重新登录")
         try:
             new = refresh_token(provider, account.client_id or "",
-                                getattr(account, "client_secret", "") or "",
+                                load_client_secret(email)
+                                or getattr(account, "client_secret", "") or "",
                                 tok["refresh_token"], old=tok)
         except OAuth2Error as e:
             # refresh_token 被吊销等：删掉坏令牌，逼用户重新走浏览器登录
@@ -312,18 +349,15 @@ def xoauth2(user: str, access_token: str) -> bytes:
 
 
 def imap_authenticate(conn, account, access_token: str) -> None:
-    """IMAP AUTHENTICATE XOAUTH2。失败时吃完 334 挑战再抛，防连接卡死。"""
+    """IMAP AUTHENTICATE XOAUTH2。
+
+    imaplib.authenticate 收到服务器拒绝时会重发一次初始响应、最终抛
+    IMAP4.error——此时 SASL 交换已完整结束，不需要也不应该再补发任何
+    字节（v1.10.1 审查修复：删掉原补偿 send，避免残留未读的 BAD 应答）。
+    所有调用点失败后都丢弃连接，由重连循环接手。
+    """
     mech = lambda _: xoauth2(account.email, access_token)  # noqa: E731
-    try:
-        conn.authenticate("XOAUTH2", mech)
-    except Exception:
-        # imaplib.authenticate 失败时会 abort 连接（连不上就无所谓），
-        # 但部分实现要求先回空行取消；统一补一刀，错误从重连循环走
-        try:
-            conn.send(b"\r\n")   # nosec: 取消 SASL 会话的协议动作
-        except Exception:
-            pass
-        raise
+    conn.authenticate("XOAUTH2", mech)
 
 
 def smtp_auth(srv, account, access_token: str) -> None:

@@ -61,8 +61,13 @@ class AccountDialog(tk.Toplevel):
         self.var_auth = tk.StringVar(
             value=_AUTH_LABELS[1] if init_auth == "oauth2" else _AUTH_LABELS[0])
         self.var_client_id = tk.StringVar(value=getattr(account, "client_id", "") or "")
-        self.var_client_secret = tk.StringVar(
-            value=getattr(account, "client_secret", "") or "")
+        # Client Secret 存在 DPAPI（v1.10.1）：编辑时回填已存值，保存才不会被误清
+        _stored_secret = ""
+        if account:
+            from core.oauth2 import load_client_secret
+            _stored_secret = load_client_secret(account.email) \
+                or getattr(account, "client_secret", "")
+        self.var_client_secret = tk.StringVar(value=_stored_secret)
 
         w0 = row(i18n.t("显示名："), lambda: ttk.Entry(frm, textvariable=self.var_name, width=30))
         w1 = row(i18n.t("邮箱地址："), lambda: ttk.Entry(frm, textvariable=self.var_email, width=30))
@@ -140,9 +145,13 @@ class AccountDialog(tk.Toplevel):
         self._set_row_visible(self._w_sec, visible)
 
     def _oauth_login(self):
-        """后台线程跑授权码+PKCE 流程，浏览器弹出，状态回显到标签。"""
+        """后台线程跑授权码+PKCE 流程，浏览器弹出，状态回显到标签。
+
+        tk 变量全部在启动线程**之前**取值（StringVar 非线程安全）。
+        """
         email_addr = self.var_email.get().strip()
         client_id = self.var_client_id.get().strip()
+        client_secret = self.var_client_secret.get().strip()
         if "@" not in email_addr or not client_id:
             self.lbl_oauth_tip.configure(text=i18n.t("请先填写邮箱与 Client ID"))
             return
@@ -156,8 +165,7 @@ class AccountDialog(tk.Toplevel):
         def worker():
             from core import oauth2
             try:
-                oauth2.authorize(provider, email_addr, client_id,
-                                 self.var_client_secret.get().strip())
+                oauth2.authorize(provider, email_addr, client_id, client_secret)
                 self._dialog_after(lambda: self.lbl_oauth_tip.configure(
                     text=i18n.t("登录成功，令牌已保存")))
             except Exception as e:
@@ -211,6 +219,8 @@ class AccountDialog(tk.Toplevel):
             self.lbl_folder_tip.configure(text=i18n.t("端口必须是数字"))
             return
         is_oauth = self._is_oauth()
+        client_id = self.var_client_id.get().strip()
+        client_secret = self.var_client_secret.get().strip()
 
         def worker():
             from core.mail_client import MailClient
@@ -218,8 +228,7 @@ class AccountDialog(tk.Toplevel):
                 id="probe", name="", email=email_addr,
                 imap_host=host, imap_port=port, ssl=use_ssl,
                 auth_type="oauth2" if is_oauth else "password",
-                client_id=self.var_client_id.get().strip(),
-                client_secret=self.var_client_secret.get().strip())
+                client_id=client_id, client_secret=client_secret)
             try:
                 folders = MailClient.list_folders(acc_probe, password)
             except Exception as e:
@@ -270,11 +279,13 @@ class AccountDialog(tk.Toplevel):
                 messagebox.showwarning(i18n.t("一邮通"),
                                        i18n.t("OAuth2 需要填写 Client ID"), parent=self)
                 return
-            from core.oauth2 import load_token
+            from core.oauth2 import load_token, save_client_secret
             if load_token(email_addr) is None:
                 messagebox.showwarning(i18n.t("一邮通"),
                                        i18n.t("请先点「浏览器登录」完成 OAuth2 授权"), parent=self)
                 return
+            # Client Secret 与令牌同级敏感：存 DPAPI，不随 Account 进 config.json
+            save_client_secret(email_addr, self.var_client_secret.get().strip())
             password = ""          # OAuth2 账户无密码，凭据在令牌里
         else:
             if not password and self.account is None:
@@ -314,7 +325,7 @@ class AccountDialog(tk.Toplevel):
                 smtp_port=smtp_port if smtp_host else old.smtp_port,
                 auth_type="oauth2" if is_oauth else "password",
                 client_id=self.var_client_id.get().strip(),
-                client_secret=self.var_client_secret.get().strip(),
+                client_secret="",   # secret 已入 DPAPI，不落 config.json
                 extra=old.extra,
             )
             self.manager.update(new_acc, password=password or None)
@@ -326,7 +337,7 @@ class AccountDialog(tk.Toplevel):
             acc.folder = folder
             acc.auth_type = "oauth2" if is_oauth else "password"
             acc.client_id = self.var_client_id.get().strip()
-            acc.client_secret = self.var_client_secret.get().strip()
+            acc.client_secret = ""   # secret 已入 DPAPI，不落 config.json
             if smtp_host:
                 acc.smtp_host, acc.smtp_port = smtp_host, smtp_port
             self.manager.update(acc, password=password or None)
