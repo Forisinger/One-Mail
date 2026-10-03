@@ -12,6 +12,7 @@ from tkinter import ttk, messagebox
 
 from core.account import Account, AccountManager, OAUTH_DOMAINS, oauth_provider_for
 from . import i18n
+from . import theme as theme_mod
 
 
 class AccountDialog(tk.Toplevel):
@@ -26,6 +27,7 @@ class AccountDialog(tk.Toplevel):
         self.manager = manager
         self.account = account
         self.on_saved = on_saved
+        self.C = theme_mod.window_colors(self)   # 窗口底也要跟随主题（v1.11.2）
         self.title(i18n.t("编辑账户") if account else i18n.t("添加账户"))
         self.resizable(False, False)
         self.grab_set()  # 模态
@@ -91,7 +93,7 @@ class AccountDialog(tk.Toplevel):
         self.btn_oauth_login = ttk.Button(
             oauth_cell, text=i18n.t("浏览器登录"), command=self._oauth_login)
         self.btn_oauth_login.pack(side="left", padx=(6, 0))
-        self.lbl_oauth_tip = ttk.Label(oauth_cell, foreground="#888", text="")
+        self.lbl_oauth_tip = ttk.Label(oauth_cell, foreground=self.C["GRAY"], text="")
         self.lbl_oauth_tip.pack(side="left", padx=(6, 0))
         wCID = row(i18n.t("OAuth2 Client ID："), lambda: oauth_cell)
         wSEC = row(i18n.t("Client Secret（可选）："), lambda: ttk.Entry(
@@ -105,7 +107,7 @@ class AccountDialog(tk.Toplevel):
         self.btn_fetch_folders = ttk.Button(folder_cell, text=i18n.t("获取"),
                                             command=self._fetch_folders)
         self.btn_fetch_folders.pack(side="left", padx=(6, 0))
-        self.lbl_folder_tip = ttk.Label(folder_cell, foreground="#888", text="")
+        self.lbl_folder_tip = ttk.Label(folder_cell, foreground=self.C["GRAY"], text="")
         self.lbl_folder_tip.pack(side="left", padx=(6, 0))
         w6 = row(i18n.t("收信文件夹："), lambda: folder_cell)
 
@@ -113,7 +115,7 @@ class AccountDialog(tk.Toplevel):
         for w in (w0, w1, wA, self._w_pass, w3, w4, w5, wCID, wSEC, w6):
             frm.columnconfigure(1, weight=1)
 
-        hint = ttk.Label(self, foreground="#888", justify="left",
+        hint = ttk.Label(self, foreground=self.C["GRAY"], justify="left",
                          text=i18n.t("提示：QQ/163 等国内邮箱用「授权码」；Gmail/Outlook 选 OAuth2，"
                                      "需先在 Google Cloud / Azure 注册应用拿到 Client ID。"))
         hint.pack(anchor="w", padx=12)
@@ -169,13 +171,17 @@ class AccountDialog(tk.Toplevel):
             from core import oauth2
             try:
                 oauth2.authorize(provider, email_addr, client_id, client_secret)
-                self._dialog_after(lambda: self.lbl_oauth_tip.configure(
-                    text=i18n.t("登录成功，令牌已保存")))
+                text = i18n.t("登录成功，令牌已保存")
             except Exception as e:
-                self._dialog_after(lambda: self.lbl_oauth_tip.configure(
-                    text=i18n.t("登录失败：{err}").format(err=e)))
+                # 必须在此处把 e 取成字符串：except 块结束后 Python 会删除 e，
+                # 延迟执行的 lambda 再引用它只会抛 NameError（且被 _safe_apply 吞掉，
+                # 用户看不到任何失败原因）
+                text = i18n.t("登录失败：{err}").format(err=e)
             finally:
-                self._dialog_after(lambda: self.btn_oauth_login.configure(state="normal"))
+                self._dialog_after(
+                    lambda: self.btn_oauth_login.configure(state="normal"))
+            self._dialog_after(
+                lambda t=text: self.lbl_oauth_tip.configure(text=t))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -235,8 +241,10 @@ class AccountDialog(tk.Toplevel):
             try:
                 folders = MailClient.list_folders(acc_probe, password)
             except Exception as e:
-                self._dialog_after(lambda: self.lbl_folder_tip.configure(
-                    text=i18n.t("获取失败：{err}").format(err=type(e).__name__)))
+                # e 在 except 块结束后即被删除，必须就地取字符串（同 _oauth_login）
+                text = i18n.t("获取失败：{err}").format(err=type(e).__name__)
+                self._dialog_after(
+                    lambda t=text: self.lbl_folder_tip.configure(text=t))
                 return
             self._dialog_after(lambda: (
                 self.cmb_folder.configure(values=folders),

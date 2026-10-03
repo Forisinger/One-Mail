@@ -4,6 +4,91 @@ All notable changes to **OneMail** are documented here. (中文版见 [CHANGELOG
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.11.3] — 2026-10-03
+
+Fix context-menu clicks silently doing nothing (right-click delete-mail not working).
+
+### Fixed
+
+- **Context-menu items did nothing when clicked** (right-click → delete mail failed; copy / mark unread / move to folder / new & delete folder / account menus / attachment & AI-summary in reading pane were all affected): on Windows, Tk invokes a menu item's command asynchronously *after* `tk_popup` returns. The old code called `destroy()` on the menu immediately after `tk_popup`, wiping out queued commands together with the menu — the symptom being "clicked the menu item, nothing happened". Fix: all popups now go through `MainWindow._popup_menu`, which destroys the menu only after the dispatch window (500 ms) has passed
+- Reproduction & diagnosis: real-GUI automation (injected right-click + locating the menu window rect to click precisely) proved the callback never fired; a minimal isolated experiment compared immediate / delayed / no destruction and confirmed commands fire only with delayed destruction
+
+### Tests
+
+- New static guard: `tk_popup` may appear in exactly one place (`MainWindow._popup_menu`) across the codebase and must not be immediately followed by `destroy()`
+
+## [1.11.2] — 2026-10-02
+
+Fix parts of the UI and several buttons still rendering light in the dark theme.
+
+### Fixed
+
+- **Whole ttk widget families stayed light in the dark theme**: only frames/labels/treeview were coloured before, while `Entry / Combobox / Button / Checkbutton / Radiobutton / Notebook tabs / Scrollbar / Separator` kept the native system look — a grid of light blocks on a dark window. The UI now switches to the fully colourable `clam` theme with per-class configuration for normal plus hover/pressed/disabled mappings (including `lightcolor/darkcolor`, which otherwise leak white bevel edges when pressed)
+- **Context menus and dropdown menus stayed light**: `tk.Menu` is drawn by Tk natively and sits outside the ttk style system, so it is now coloured through the option database (background / foreground / active colours / disabled colour / borderless); the Combobox popdown list is handled the same way
+- **Dialog windows kept a light system background**: a ttk.Frame only covers the content area, leaving the Toplevel edges light. Account manager, account editor, settings, compose, AI-write and AI-summary windows now set their window background
+- **Hardcoded greys**: three `foreground="#888"` in the account dialog and five in the settings dialog (also poor contrast on dark) now use the themed `GRAY`; the AI input box in the compose window and the accent swatch in settings got explicit backgrounds
+
+### Changed
+
+- Palette gains control-surface colours: `FIELD / BTN / BTN_ACTIVE / BTN_PRESSED / TAB / TROUGH / DISABLED`, filled for both themes
+- New `theme.window_colors(win)`: applies the theme background to a Toplevel (no tkinter import added — the theme module stays importable without tkinter)
+
+### Tests
+
+- New palette-integrity tests: both themes must define the same keys, every value must be a valid `#rrggbb`, dark surfaces have a brightness ceiling and dark text a floor (so the palette cannot silently regress to light), minimum text-on-surface contrast, and accent overrides must keep the new keys
+- New repo-wide static guard: any colour literal in `src/` outside the palette definition is an error (`.get(key, default)` fallbacks are allowed)
+- New `_setup_style` coverage check: every ttk widget class, the `clam` switch, and the option-database entries for menus and dropdown lists must be present
+
+## [1.11.1] — 2026-10-02
+
+Fix the mail list (Account/From/Subject/Date header row) disappearing on window/DPI resize, and make column widths adaptive.
+
+### Fixed
+
+- **The whole mail list vanished after resizing**: the list used Treeview's default 10 rows and the reader used Text's default 24 rows; their combined requested height exceeded the minimum window, so when space ran short one pane was squeezed to 0 pixels (taking the header row with it). Both now get explicit smaller default heights, and pane positions are corrected after the window `<Configure>` event (DPI / display-scaling changes included): mail list ≥130px, reader ≥80px, left "Mail" panel ≥170px. Only out-of-range values are corrected — positions you dragged yourself are left alone
+- **The rightmost "Date" column was clipped on narrow windows**: column widths are now derived from the visible width (Account 14% / From 20% / Subject 47% / Date 19%, each with a minimum) and always add up to exactly the visible width; below the sum of the minimums they fall back to the minimums with a new horizontal scrollbar as a safety net
+
+### Changed
+
+- Column-width allocation and sash clamping were extracted into `ui/layout.py` (Tk-free) so they can be unit-tested offline
+- Resize handling is debounced (120 ms) with re-entrancy protection, so it never fights your manual pane/column drags
+
+### Tests
+
+- New `tests/test_layout.py` (17 cases): column allocation (no zero-width column even in a very narrow container), sash clamping (including the pathological "squeezed to 3 px" value), dynamic minimum shrinking, plus the reported scenario pinned as assertions
+
+## [1.11.0] — 2026-10-02
+
+UI reorganisation: centralised settings, a dedicated account manager, and the left panel renamed to "Mail".
+
+### Added
+
+- The settings dialog is now three tabs, gathering app-level switches that used to be scattered:
+  - **Appearance**: language, theme, plus a new **custom accent color** (colour picker + swatch preview + reset). Unread text and selection background are derived per theme (darkened on light, brightened on dark) so a custom accent cannot break contrast
+  - **AI**: base URL / model / key (logic unchanged, key still DPAPI-encrypted)
+  - **Other**: **launch-at-startup toggle** (previously registry-only), **sync-read-state toggle** (previously tray-only), open log folder
+- **Account manager dialog** (new `ui/accounts_dialog.py`): account list (name / email / auth / server / state) with Add / Edit / Remove / Enable-Disable buttons; double-click a row to edit. Removal stops the fetch thread first (stop + bounded join) before wiping the local cache
+- New "⚙ Accounts…" entry at the bottom of the left panel; account-card context menu gained "Accounts…" (preselecting that account)
+
+### Changed
+
+- Removed the "Add / Edit / Remove account" buttons from the main toolbar — they now live in the account manager; the toolbar keeps only mail-related actions (Settings / Fetch Now / Compose / Reply / Mark All Read / Mark Read / AI Summary)
+- The left panel header "Accounts" was renamed to "**Mail**"
+- "New folder…" moved out of the mail-list context menu into the Mail panel: the folder section header now has a "＋ New" entry (the section's context menu still creates and deletes folders)
+- New config key `settings.theme_overrides` (per-theme accent override); theme and accent still apply **after restart**
+
+### Fixed
+
+- **OAuth2 sign-in failures showed no reason**: the `except ... as e` variable was captured by a deferred lambda — Python deletes `e` when the handler exits, so the callback only raised NameError, which the dialog's silent fallback swallowed. The error string is now captured immediately (both the browser sign-in and the "fetch folders" paths in `account_dialog.py`)
+- `theme.normalize_hex()` raised AttributeError on non-string input (hand-edited config), breaking colour reads — it now treats it as invalid and falls back to the default
+- Resetting the accent no longer leaves an empty `theme_overrides` container behind
+- i18n: removed 2 duplicate keys (`主题`, `AI 写信`) and 3 dead keys (`邮箱账户` and two "select an account first" strings); added EN translations for all new v1.11.0 strings
+
+### Tests
+
+- New `tests/test_v111.py` (18 cases): accent normalisation / mixing / light-dark derivation, override read-write with invalid values, per-theme isolation, `_EN` duplicate-key detection, UI module structure checks
+- New `tests/test_static_checks.py` (2 repo-wide static guards): local import paths must exist, and an `except ... as e` variable must never be captured by a lambda (both bugs above would be caught here)
+
 ## [1.10.4] — 2026-10-02
 
 Fifth review round: status visibility & error messages.

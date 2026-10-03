@@ -31,7 +31,7 @@ _EN = {
     "全部": "All",
     "只看未读": "Unread",
     "有附件": "Attachments",
-    "邮箱账户": "Accounts",
+    "邮件管理": "Mail",
     "文件夹": "Folders",
     "收件箱": "Inbox",
     "来源": "Account",
@@ -51,8 +51,6 @@ _EN = {
         "Account {name} saved, connecting {host} …",
     "全部邮件": "All Mail",
     "请先选中要回复的邮件": "Select a mail to reply first",
-    "请先在左侧列表选中要编辑的账户": "Select an account to edit first",
-    "请先在左侧列表选中要删除的账户": "Select an account to remove first",
     "删除账户 {name}？\n该账户的本地邮件缓存将一并删除。":
         "Remove account {name}?\nIts local mail cache will be deleted too.",
     "回复：{subj}": "Re: {subj}",
@@ -97,7 +95,6 @@ _EN = {
         "Delete folder {name}? Mails inside will move back to Inbox.",
     # ---- 状态 ----
     "已复制{label}：{preview}": "Copied {label}: {preview}",
-    "主题": "Subject",
     "发件人名称": "sender name",
     "发件人邮箱": "sender address",
     "正文": "body",
@@ -213,7 +210,6 @@ _EN = {
     "AI 总结": "AI Summary",
     "正在请求 AI…": "Requesting AI…",
     "AI 总结失败：{err}": "AI summary failed: {err}",
-    "AI 写信": "AI Write",
     "请描述要写的邮件内容：": "Describe the mail to write:",
     "生成": "Generate",
     "AI 生成中…": "AI generating…",
@@ -244,6 +240,38 @@ _EN = {
     "未设置密码/授权码，请在界面中编辑账户":
         "No auth code set, please edit the account in UI",
     "{n}s 后重连": "reconnect in {n}s",
+    # ---- 邮件管理栏 / 账户管理（v1.11.0） ----
+    "⚙ 账户管理…": "⚙ Accounts…",
+    "账户管理…": "Accounts…",
+    "账户管理": "Account Manager",
+    "账户列表（双击编辑）": "Accounts (double-click to edit)",
+    "显示名": "Display Name",
+    "邮箱": "Email",
+    "认证": "Auth",
+    "服务器": "Server",
+    "状态": "Status",
+    "已启用": "Enabled",
+    "已停用": "Disabled",
+    "启用 / 停用": "Enable / Disable",
+    "授权码": "Auth code",
+    "＋ 新建": "＋ New",
+    "请先选中一个账户": "Select an account first",
+    "账户已删除": "Account removed",
+    "账户 {name} 已停用": "Account {name} disabled",
+    # ---- 设置页签（v1.11.0） ----
+    "外观": "Appearance",
+    "其他": "Other",
+    "AI 功能": "AI",
+    "强调色（重启生效）": "Accent color (restart to apply)",
+    "选择颜色…": "Pick Color…",
+    "恢复默认": "Reset Default",
+    "默认：{color}": "Default: {color}",
+    "主题与强调色在下次启动后生效。": "Theme and accent apply after restart.",
+    "开机自启（用户级，无需管理员）": "Launch at startup (per-user, no admin)",
+    "同步已读到服务器（关闭后只改本地）":
+        "Sync read state to server (off = local only)",
+    "开机自启设置失败（可能被安全软件拦截）":
+        "Failed to set autostart (blocked by security software?)",
 }
 
 

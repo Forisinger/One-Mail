@@ -30,6 +30,9 @@ from . import theme as theme_mod
 from . import icon as icon_mod
 from .account_dialog import AccountDialog
 from .htmltext import render_html
+from .layout import (COL_MIN, COL_RATIO, PANE_MIN_BODY, PANE_MIN_LEFT,
+                     PANE_MIN_MAIL, PANE_MIN_RIGHT, clamp_sash,
+                     pane_minimums, plan_column_widths)
 
 FONT_UI = ("Microsoft YaHei UI", 10)
 FONT_UI_B = ("Microsoft YaHei UI", 10, "bold")
@@ -37,35 +40,156 @@ FONT_TITLE = ("Microsoft YaHei UI", 13, "bold")
 
 
 def _setup_style(root: tk.Tk, c: dict[str, str]) -> None:
+    """把整套 ttk 控件着色到当前主题（v1.11.2）。
+
+    原先只配了 Frame/Label/Treeview，其余控件走系统原生外观——深色主题下
+    Entry/Combobox/Button/Checkbutton/Notebook/Scrollbar/右键菜单全是浅色。
+    这里统一切到可完全着色的 `clam` 主题并逐控件配色（vista/winnative 是
+    原生主题，控件的内部颜色无法通过 ttk.Style 覆盖）。
+    """
     style = ttk.Style(root)
-    for theme in ("vista", "winnative", "clam"):
-        if theme in style.theme_names():
-            style.theme_use(theme)
-            break
-    style.configure(".", font=FONT_UI)
-    style.configure("TFrame", background=c["BG"])
-    style.configure("Card.TFrame", background=c["CARD"])
-    style.configure("TLabel", background=c["BG"], foreground=c["TEXT"])
-    style.configure("Card.TLabel", background=c["CARD"], foreground=c["TEXT"])
-    style.configure("Gray.TLabel", background=c["BG"], foreground=c["GRAY"])
-    style.configure("Tool.TButton", padding=(12, 6))
-    style.configure(
-        "Treeview", rowheight=36, font=FONT_UI,
-        background=c["CARD"], fieldbackground=c["CARD"], borderwidth=0,
-        foreground=c["TEXT"],
-    )
-    style.configure(
-        "Treeview.Heading", font=("Microsoft YaHei UI", 10, "bold"),
-        padding=(8, 10), background=c["HEADING"], relief="flat",
-        foreground=c["TEXT"],
-    )
+    if "clam" in style.theme_names():
+        style.theme_use("clam")
+
+    bg, card, text = c["BG"], c["CARD"], c["TEXT"]
+    field, btn = c["FIELD"], c["BTN"]
+    border, accent = c["BORDER"], c["ACCENT"]
+    gray, dis, sel_fg = c["GRAY"], c["DISABLED"], c["SEL_FG"]
+
+    # 兜底：让未单独配置的元素也拿到主题色
+    style.configure(".", font=FONT_UI, background=bg, foreground=text,
+                    fieldbackground=field, bordercolor=border,
+                    lightcolor=btn, darkcolor=btn, troughcolor=c["TROUGH"],
+                    focuscolor=accent, arrowcolor=text,
+                    selectbackground=accent, selectforeground=sel_fg)
+
+    # ---- 容器与文字 ----
+    style.configure("TFrame", background=bg)
+    style.configure("Card.TFrame", background=card)
+    style.configure("TLabel", background=bg, foreground=text)
+    style.configure("Card.TLabel", background=card, foreground=text)
+    style.configure("Gray.TLabel", background=bg, foreground=gray)
+    style.configure("Hint.TLabel", background=bg, foreground=gray)
+    style.configure("TLabelframe", background=bg, bordercolor=border,
+                    lightcolor=bg, darkcolor=bg, relief="solid")
+    style.configure("TLabelframe.Label", background=bg, foreground=text)
+    style.configure("TSeparator", background=c["DIVIDER"])
+    style.configure("TSizegrip", background=bg)
+
+    # ---- 按钮 ----
+    style.configure("TButton", background=btn, foreground=text,
+                    bordercolor=border, lightcolor=btn, darkcolor=btn,
+                    focuscolor=accent, padding=(10, 5), relief="flat")
     style.map(
-        "Treeview",
-        background=[("selected", c["ACCENT"])],
-        foreground=[("selected", c["SEL_FG"])],
+        "TButton",
+        background=[("disabled", bg), ("pressed", c["BTN_PRESSED"]),
+                    ("active", c["BTN_ACTIVE"])],
+        foreground=[("disabled", dis)],
+        lightcolor=[("pressed", c["BTN_PRESSED"]), ("active", c["BTN_ACTIVE"])],
+        darkcolor=[("pressed", c["BTN_PRESSED"]), ("active", c["BTN_ACTIVE"])],
+        bordercolor=[("focus", accent)],
     )
-    style.configure("TPanedwindow", background=c["BG"])
-    style.configure("Sash", sashthickness=6)
+    style.configure("Tool.TButton", padding=(12, 6))
+
+    # ---- 输入类（Entry / Combobox / Spinbox） ----
+    for name in ("TEntry", "TSpinbox"):
+        style.configure(name, fieldbackground=field, foreground=text,
+                        background=field, bordercolor=border,
+                        lightcolor=border, darkcolor=border,
+                        insertcolor=text, arrowcolor=text, padding=4)
+        style.map(name,
+                  fieldbackground=[("disabled", bg), ("readonly", card)],
+                  foreground=[("disabled", dis)],
+                  bordercolor=[("focus", accent)])
+    style.configure("TCombobox", fieldbackground=field, background=btn,
+                    foreground=text, arrowcolor=text, bordercolor=border,
+                    lightcolor=border, darkcolor=border, padding=4,
+                    arrowsize=14)
+    style.map("TCombobox",
+              fieldbackground=[("readonly", field), ("disabled", bg)],
+              background=[("active", c["BTN_ACTIVE"]), ("disabled", bg)],
+              foreground=[("disabled", dis)],
+              arrowcolor=[("disabled", dis)],
+              lightcolor=[("active", c["BTN_ACTIVE"])],
+              darkcolor=[("active", c["BTN_ACTIVE"])],
+              bordercolor=[("focus", accent)])
+
+    # ---- 勾选类 ----
+    for name in ("TCheckbutton", "TRadiobutton"):
+        style.configure(name, background=bg, foreground=text,
+                        indicatorcolor=field, indicatorbackground=field,
+                        bordercolor=border, focuscolor=accent,
+                        lightcolor=btn, darkcolor=btn)
+        style.map(name,
+                  background=[("active", bg)],
+                  foreground=[("disabled", dis)],
+                  indicatorcolor=[("selected", accent),
+                                  ("pressed", c["BTN_PRESSED"]),
+                                  ("disabled", bg)],
+                  indicatorbackground=[("selected", accent),
+                                       ("disabled", bg)])
+
+    # ---- 页签 ----
+    style.configure("TNotebook", background=bg, bordercolor=border,
+                    lightcolor=bg, darkcolor=bg, tabmargins=(2, 4, 2, 0))
+    style.configure("TNotebook.Tab", background=c["TAB"], foreground=gray,
+                    padding=(14, 6), bordercolor=border,
+                    lightcolor=c["TAB"], darkcolor=c["TAB"])
+    style.map("TNotebook.Tab",
+              background=[("selected", card), ("active", c["BTN_ACTIVE"])],
+              foreground=[("selected", text)],
+              lightcolor=[("selected", card), ("active", c["BTN_ACTIVE"])],
+              darkcolor=[("selected", card), ("active", c["BTN_ACTIVE"])])
+
+    # ---- 滚动条 ----
+    style.configure("TScrollbar", background=btn, troughcolor=c["TROUGH"],
+                    bordercolor=border, arrowcolor=gray,
+                    lightcolor=btn, darkcolor=btn, relief="flat")
+    style.map("TScrollbar",
+              background=[("pressed", accent), ("active", c["BTN_ACTIVE"])],
+              arrowcolor=[("active", text)],
+              lightcolor=[("pressed", accent), ("active", c["BTN_ACTIVE"])],
+              darkcolor=[("pressed", accent), ("active", c["BTN_ACTIVE"])])
+
+    # ---- 表格 ----
+    style.configure("Treeview", rowheight=36, font=FONT_UI,
+                    background=card, fieldbackground=card, foreground=text,
+                    bordercolor=border, lightcolor=card, darkcolor=card,
+                    borderwidth=0)
+    style.configure("Treeview.Heading",
+                    font=("Microsoft YaHei UI", 10, "bold"),
+                    padding=(8, 10), background=c["HEADING"], foreground=text,
+                    relief="flat", bordercolor=border,
+                    lightcolor=c["HEADING"], darkcolor=c["HEADING"])
+    style.map("Treeview",
+              background=[("selected", accent)],
+              foreground=[("selected", sel_fg)])
+    style.map("Treeview.Heading",
+              background=[("active", c["BTN_ACTIVE"])],
+              lightcolor=[("active", c["BTN_ACTIVE"])],
+              darkcolor=[("active", c["BTN_ACTIVE"])])
+
+    # ---- 分栏 ----
+    style.configure("TPanedwindow", background=bg)
+    style.configure("Sash", sashthickness=6, gripcount=0, background=border,
+                    bordercolor=bg, lightcolor=border, darkcolor=border)
+
+    # ---- option database：这两类控件没有 ttk.Style 通道 ----
+    # 右键菜单 / 下拉菜单（tk.Menu 由 Tk 原生绘制，只能走 option database）
+    root.option_add("*Menu.background", card)
+    root.option_add("*Menu.foreground", text)
+    root.option_add("*Menu.activeBackground", accent)
+    root.option_add("*Menu.activeForeground", sel_fg)
+    root.option_add("*Menu.disabledForeground", dis)
+    root.option_add("*Menu.borderWidth", 0)
+    root.option_add("*Menu.activeBorderWidth", 0)
+    root.option_add("*Menu.relief", "flat")
+    # Combobox 弹出的列表（内部是 Tk listbox，不在 ttk 样式体系内）
+    root.option_add("*TCombobox*Listbox.background", field)
+    root.option_add("*TCombobox*Listbox.foreground", text)
+    root.option_add("*TCombobox*Listbox.selectBackground", accent)
+    root.option_add("*TCombobox*Listbox.selectForeground", sel_fg)
+    root.option_add("*TCombobox*Listbox.borderWidth", 0)
 
 
 def _tr_status(text: str) -> str:
@@ -104,6 +228,11 @@ class MainWindow:
         self._collapsed = bool(
             config_store.load().get("settings", {}).get("accounts_collapsed", False)
         )
+        # 缩放保护状态（v1.11.1）
+        self._right_pane = None
+        self._resize_job = None
+        self._balancing = False
+        self._last_tree_width = 0
 
         root.title(i18n.t("一邮通 OneMail"))
         root.geometry("1060x660")
@@ -119,6 +248,9 @@ class MainWindow:
         self._build_statusbar()
         self.refresh_accounts()
         self.refresh_mails()
+        # 窗口/DPI 缩放后纠正分栏与列宽，防止邮件列表被挤没（v1.11.1）
+        self.root.bind("<Configure>", self._on_root_configure, add="+")
+        self.root.after_idle(self._after_resize)
 
     # ---------- 配置小助手 ----------
     def _get_folders(self) -> list[str]:
@@ -151,15 +283,14 @@ class MainWindow:
         bar = ttk.Frame(self.root, padding=(10, 8, 10, 4))
         bar.pack(fill="x")
 
+        # 顶栏只保留与邮件本身相关的动作；账户增删改统一进
+        # 左侧「邮件管理」栏的账户管理界面（v1.11.0）
         for text, cmd in (
             (i18n.t("⚙ 设置"), self.open_settings),   # 左上角齿轮（v1.10.0 应晨央要求前置）
             (i18n.t("⟳ 立即收信"), self.fetch_now),
             (i18n.t("✉ 写邮件"), self.compose_new),
             (i18n.t("↩ 回复"), self.compose_reply),
             (i18n.t("✓ 全部已读"), self.mark_all_read),
-            (i18n.t("＋ 添加账户"), self.add_account),
-            (i18n.t("✎ 编辑账户"), self.edit_account),
-            (i18n.t("－ 删除账户"), self.remove_account),
             (i18n.t("✓ 标记已读"), self.mark_selected_read),
             (i18n.t("🤖 AI 总结"), self.ai_summary),
         ):
@@ -213,30 +344,42 @@ class MainWindow:
         self._pane = ttk.Panedwindow(self.root, orient="horizontal")
         self._pane.pack(fill="both", expand=True, padx=(6, 10), pady=6)
 
-        # 左：账户面板（卡片）
+        # 左：邮件管理面板（账户卡片 + 本地文件夹）
         self._left_card = ttk.Frame(self._pane, style="Card.TFrame")
         self._pane.insert("end", self._left_card, weight=1)
         header = tk.Frame(self._left_card, bg=self.C["CARD"])
         header.pack(fill="x", padx=14, pady=(12, 4))
-        tk.Label(header, text=i18n.t("邮箱账户"), bg=self.C["CARD"],
+        tk.Label(header, text=i18n.t("邮件管理"), bg=self.C["CARD"],
                  fg=self.C["TEXT"], font=FONT_UI_B).pack(side="left")
         self._header_btn = tk.Label(header, text="«", bg=self.C["CARD"],
                                     fg=self.C["GRAY"], font=FONT_UI_B,
                                     cursor="hand2")
         self._header_btn.pack(side="right")
         self._header_btn.bind("<Button-1>", lambda e: self.toggle_accounts())
+        # 面板底部：账户管理入口（必须先 pack 才能在展开的列表下方占位）
+        footer = tk.Frame(self._left_card, bg=self.C["CARD"])
+        footer.pack(side="bottom", fill="x", padx=10, pady=(2, 10))
+        self._acct_btn = tk.Label(
+            footer, text=i18n.t("⚙ 账户管理…"), bg=self.C["CARD"],
+            fg=self.C["ACCENT"], font=FONT_UI_B, cursor="hand2", anchor="w")
+        self._acct_btn.pack(fill="x")
+        self._acct_btn.bind("<Button-1>", lambda e: self.open_account_manager())
         self.account_list_frame = tk.Frame(self._left_card, bg=self.C["CARD"])
         self.account_list_frame.pack(fill="both", expand=True,
                                      padx=8, pady=(4, 8))
 
         # 右：邮件列表 + 阅读区
         right = ttk.Panedwindow(self._pane, orient="vertical")
+        self._right_pane = right      # 缩放后纠正 sash 需要引用（v1.11.1）
         self._pane.add(right, weight=3)
 
         cols = ("account", "from", "subject", "date")
         frame_top = ttk.Frame(right, style="Card.TFrame")
+        # height 显式给一个较小值：Treeview 默认 10 行，与阅读区默认 24 行的
+        # 请求高度加起来远超最小窗口，缩放/重排时两个分栏会互相挤占（曾把
+        # 整个邮件列表连同列头挤成 0 高度而"消失"）
         self.tree = ttk.Treeview(frame_top, columns=cols, show="headings",
-                                 selectmode="browse")
+                                 selectmode="browse", height=6)
         for cid, text, width, anchor in (
             ("account", i18n.t("来源"), 110, "w"),
             ("from", i18n.t("发件人"), 160, "w"),
@@ -247,15 +390,21 @@ class MainWindow:
             self.tree.heading(cid, text=text,
                               command=lambda c=cid: self._on_sort(c))
             self.tree.column(cid, width=width, anchor=anchor,
+                             minwidth=COL_MIN[cid],
                              stretch=(cid == "subject"))
         vsb = ttk.Scrollbar(frame_top, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=vsb.set)
-        self.tree.pack(side="left", fill="both", expand=True)
+        hsb = ttk.Scrollbar(frame_top, orient="horizontal",
+                            command=self.tree.xview)
+        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        hsb.pack(side="bottom", fill="x")   # 先占底部，防极窄时列被裁掉
         vsb.pack(side="right", fill="y")
+        self.tree.pack(side="left", fill="both", expand=True)
         self.tree.bind("<Double-1>", self._on_mail_open)
         self.tree.bind("<Return>", self._on_mail_open)   # 键盘用户也能打开邮件
         self.tree.bind("<Button-3>", self._mail_list_menu)
         self.tree.bind("<Delete>", lambda e: self.delete_selected_mail())
+        # 列宽自适应：容器宽度变化时按比例重算，保证四列都在（v1.11.1）
+        self.tree.bind("<Configure>", self._on_tree_configure)
         # 行样式：未读加粗着色 + 隔行底色
         self.tree.tag_configure("unread", font=FONT_UI_B,
                                 foreground=self.C["ACCENT_DARK"])
@@ -268,6 +417,7 @@ class MainWindow:
             body_card, wrap="word", state="disabled", relief="flat",
             padx=16, pady=12, bg=self.C["CARD"], fg=self.C["TEXT"],
             font=FONT_UI, bd=0, insertbackground=self.C["TEXT"],
+            height=8,   # 同理：默认 24 行会把邮件列表挤没
         )
         # 结构化排版标签
         self.txt_body.tag_configure("subject", font=FONT_TITLE,
@@ -307,6 +457,93 @@ class MainWindow:
             config_store.save(cfg)
         except Exception:
             pass  # 状态记忆失败不影响功能
+
+    # ---------- 缩放保护（v1.11.1） ----------
+    def _on_root_configure(self, event):
+        """窗口尺寸变化（含 DPI / 显示缩放切换）时延迟重排。
+
+        不在这里直接改 sash：Configure 会连续触发且此刻几何尚未稳定，
+        用短防抖合并到最后一次即可。
+        """
+        if getattr(event, "widget", None) is not self.root:
+            return
+        if self._resize_job is not None:
+            try:
+                self.root.after_cancel(self._resize_job)
+            except Exception:
+                pass
+        self._resize_job = self.root.after(120, self._after_resize)
+
+    def _after_resize(self):
+        self._resize_job = None
+        self._ensure_pane_minimums()
+        self._autofit_columns()
+
+    @staticmethod
+    def _sashpos(pane) -> int | None:
+        """读第 0 条分隔条位置；只剩一个 pane（面板已折叠）时返回 None。"""
+        try:
+            return int(pane.sashpos(0))
+        except tk.TclError:
+            return None
+
+    def _ensure_pane_minimums(self):
+        """把被压到 0（或过小）的分栏拉回最小尺寸。
+
+        只纠正越界值——用户手动拖出的合理 sash 位置保持不动，因此不会
+        影响正常的拖动调整。
+        """
+        if self._balancing:
+            return
+        self._balancing = True
+        try:
+            rp = self._right_pane
+            if rp is not None and len(rp.panes()) >= 2:
+                h = rp.winfo_height()
+                if h > 1:
+                    top_min, bot_min = pane_minimums(
+                        h, PANE_MIN_MAIL, PANE_MIN_BODY)
+                    pos = self._sashpos(rp)
+                    if pos is not None:
+                        new = clamp_sash(pos, h, top_min, bot_min)
+                        if new != pos:
+                            rp.sashpos(0, new)
+            if len(self._pane.panes()) >= 2:
+                w = self._pane.winfo_width()
+                if w > 1:
+                    left_min, right_min = pane_minimums(
+                        w, PANE_MIN_LEFT, PANE_MIN_RIGHT)
+                    pos = self._sashpos(self._pane)
+                    if pos is not None:
+                        new = clamp_sash(pos, w, left_min, right_min)
+                        if new != pos:
+                            self._pane.sashpos(0, new)
+        except Exception:
+            pass
+        finally:
+            self._balancing = False
+
+    def _on_tree_configure(self, event):
+        self._autofit_columns(getattr(event, "width", None))
+
+    def _autofit_columns(self, width: int | None = None):
+        """按可视宽度自适应四列宽度，保证「时间」列不会被裁掉。
+
+        - 只在宽度变化时重算：用户手动拖动列宽的结果不会被立刻覆盖
+        - 容器比四列最小宽之和还窄时按最小宽排布，由水平滚动条兜底
+        """
+        try:
+            if width is None:
+                width = self.tree.winfo_width()
+            width = int(width)
+            if width <= 1 or width == self._last_tree_width:
+                return
+            self._last_tree_width = width
+            widths = plan_column_widths(max(width - 2, 1), COL_MIN, COL_RATIO)
+            for cid, w in widths.items():
+                self.tree.column(cid, width=w)
+        except Exception:
+            pass
 
     # ---------- 状态栏 ----------
     def _build_statusbar(self):
@@ -435,6 +672,12 @@ class MainWindow:
         tk.Label(head, text=i18n.t("文件夹"), bg=self.C["CARD"],
                  fg=self.C["GRAY"], font=("Microsoft YaHei UI", 9, "bold"),
                  anchor="w").pack(side="left")
+        # 新建信件文件夹的入口（v1.11.0：从邮件列表右键移入本栏）
+        new_btn = tk.Label(head, text=i18n.t("＋ 新建"), bg=self.C["CARD"],
+                           fg=self.C["ACCENT"], font=("Microsoft YaHei UI", 9),
+                           cursor="hand2")
+        new_btn.pack(side="right")
+        new_btn.bind("<Button-1>", lambda e: self.create_folder())
         head.bind("<Button-3>", lambda e: self._folder_menu(e, None))
         self._folder_rows.append(head)
         inbox_c, inbox_u = counts.get("", (0, 0))
@@ -472,6 +715,18 @@ class MainWindow:
         self.refresh_accounts()
         self.refresh_mails()
 
+    def _popup_menu(self, menu: tk.Menu, event) -> None:
+        """弹出右键菜单（v1.11.3 修复：不能在 tk_popup 返回后立即 destroy）。
+
+        Windows 上 Tk 的菜单项命令是在 tk_popup 返回之后异步 invoke 的；
+        立即 destroy 会把尚未分发的 command 连同菜单一起销毁——表现为
+        「点了菜单项没有任何反应」（右键删除邮件即此 bug）。延迟销毁，
+        给命令分发留出窗口。
+        """
+        menu.tk_popup(event.x_root, event.y_root)
+        menu.grab_release()
+        menu.after(500, menu.destroy)
+
     def _folder_menu(self, event, name: str | None):
         """文件夹分区右键：新建 / 删除文件夹。"""
         menu = tk.Menu(self.root, tearoff=0)
@@ -480,9 +735,7 @@ class MainWindow:
         if name:
             menu.add_command(label=i18n.t("删除文件夹"),
                              command=lambda: self.delete_folder(name))
-        menu.tk_popup(event.x_root, event.y_root)
-        menu.grab_release()
-        menu.destroy()
+        self._popup_menu(menu, event)
 
     def create_folder(self):
         name = simpledialog.askstring(
@@ -793,8 +1046,7 @@ class MainWindow:
         menu.add_separator()
         menu.add_command(label=i18n.t("标记为未读"),
                          command=self.mark_selected_unread)
-        # 邮件列表右键直接新建文件夹（v1.10.0）
-        menu.add_command(label=i18n.t("新建文件夹…"), command=self.create_folder)
+        # 新建文件夹已移入左侧「邮件管理」栏（v1.11.0），此处只留"移动到"的目的地
         # 移动到本地文件夹（v1.9.0）
         folders = self._get_folders()
         if folders:
@@ -812,9 +1064,7 @@ class MainWindow:
         menu.add_separator()
         menu.add_command(label=i18n.t("删除（仅本地缓存）"),
                          command=self.delete_selected_mail)
-        menu.tk_popup(event.x_root, event.y_root)
-        menu.grab_release()          # 现代 tkinter 通常自动释放，兜底
-        menu.destroy()               # 用完即毁，托盘长年运行不累积死控件
+        self._popup_menu(menu, event)
 
     def delete_selected_mail(self):
         """删除选中邮件的本地缓存（不动服务器上的邮件）。"""
@@ -833,20 +1083,21 @@ class MainWindow:
         self.var_status.set(i18n.t("已从本地缓存删除该邮件（服务器不受影响）"))
 
     def _account_menu(self, account_id: str | None, event):
-        """账户面板右键：复制邮箱地址/账户名。"""
-        if not account_id:
-            return  # "全部邮件"卡片无地址可复制
-        acc = self.manager.get(account_id)
-        if acc is None:
-            return
+        """账户面板右键：复制邮箱地址/账户名 + 进入账户管理（v1.11.0）。"""
         menu = tk.Menu(self.root, tearoff=0)
-        menu.add_command(label=i18n.t("复制邮箱地址"),
-                         command=lambda: self._copy_to_clipboard(acc.email, "邮箱地址"))
-        menu.add_command(label=i18n.t("复制账户名"),
-                         command=lambda: self._copy_to_clipboard(acc.name, "账户名"))
-        menu.tk_popup(event.x_root, event.y_root)
-        menu.grab_release()
-        menu.destroy()
+        acc = self.manager.get(account_id) if account_id else None
+        if acc is not None:
+            menu.add_command(label=i18n.t("复制邮箱地址"),
+                             command=lambda: self._copy_to_clipboard(
+                                 acc.email, "邮箱地址"))
+            menu.add_command(label=i18n.t("复制账户名"),
+                             command=lambda: self._copy_to_clipboard(
+                                 acc.name, "账户名"))
+            menu.add_separator()
+        # 账户增删改统一入口（顶栏按钮已移入该界面）
+        menu.add_command(label=i18n.t("账户管理…"),
+                         command=lambda: self.open_account_manager(account_id))
+        self._popup_menu(menu, event)
 
     def _body_menu(self, event):
         """阅读区右键：复制 / 全选 / 附件（打开/另存/全部保存）/ AI 总结。"""
@@ -871,9 +1122,7 @@ class MainWindow:
             menu.add_cascade(label=i18n.t("附件"), menu=att_menu)
         menu.add_separator()
         menu.add_command(label=i18n.t("AI 总结"), command=self.ai_summary)
-        menu.tk_popup(event.x_root, event.y_root)
-        menu.grab_release()
-        menu.destroy()
+        self._popup_menu(menu, event)
 
     # ---------- 附件：打开 / 另存为 / 全部保存（v1.9.0） ----------
     def _fetch_mail_attachments(self, mail, done):
@@ -1041,6 +1290,7 @@ class MainWindow:
         win = tk.Toplevel(self.root)
         win.title(f"{i18n.t('AI 总结')} · {subject[:40]}")
         win.geometry("560x440")
+        theme_mod.window_colors(win, self.C)        # 跟随主题（v1.11.2）
         win.transient(self.root)
         txt = tk.Text(win, wrap="word", font=FONT_UI, bd=0, padx=14, pady=12,
                       bg=self.C["CARD"], fg=self.C["TEXT"])
@@ -1129,8 +1379,14 @@ class MainWindow:
         self.refresh_accounts()
         self.root.event_generate("<<UnreadChanged>>", when="tail")
 
-    def add_account(self):
-        AccountDialog(self.root, self.manager, on_saved=self._on_account_saved)
+    # ---------- 账户管理（v1.11.0：添加/编辑/删除合并到同一界面） ----------
+    def open_account_manager(self, account_id: str | None = None):
+        """打开账户管理界面（左栏底部「⚙ 账户管理…」或账户右键进入）。"""
+        from .accounts_dialog import AccountsDialog
+        AccountsDialog(self.root, self.manager, self.scheduler,
+                       on_saved=self._on_account_saved,
+                       on_removed=self._on_account_removed,
+                       preselect=account_id or self._filter_account)
 
     # ---------- 写信 ----------
     def compose_new(self):
@@ -1161,15 +1417,6 @@ class MainWindow:
         ComposeWindow(self.root, self.manager, account=acc, to=reply_to,
                       subject=subj, body=quote)
 
-    def edit_account(self):
-        acc = self._selected_account()
-        if acc is None:
-            messagebox.showinfo(i18n.t("一邮通"),
-                                i18n.t("请先在左侧列表选中要编辑的账户"))
-            return
-        AccountDialog(self.root, self.manager, account=acc,
-                      on_saved=lambda a, p: self._on_account_saved(a, p))
-
     def prompt_missing_password(self):
         """启动时若有账户缺密码，自动弹出编辑框录入授权码（保存后继续下一个）。"""
         for acc in self.manager.all():
@@ -1190,31 +1437,28 @@ class MainWindow:
             return None
         return self.manager.get(self._filter_account)
 
-    def _on_account_saved(self, acc: Account, password: str):
-        self.scheduler.start_account(acc)
+    def _on_account_saved(self, acc: Account, password: str | None):
+        """账户新增/编辑/启用停用后的统一收口：线程生命周期只在这里决定。"""
+        if acc.enabled:
+            self.scheduler.start_account(acc)
+        else:
+            self.scheduler.stop_account(acc.id)
+            self._account_status.pop(acc.id, None)
         self.full_refresh()
         self.var_status.set(
             i18n.t("账户 {name} 已保存，开始连接 {host} …")
-            .format(name=acc.name, host=acc.imap_host))
+            .format(name=acc.name, host=acc.imap_host)
+            if acc.enabled else
+            i18n.t("账户 {name} 已停用").format(name=acc.name))
 
-    def remove_account(self):
-        acc = self._selected_account()
-        if acc is None:
-            messagebox.showinfo(i18n.t("一邮通"),
-                                i18n.t("请先在左侧列表选中要删除的账户"))
-            return
-        if not messagebox.askyesno(
-                i18n.t("一邮通"),
-                i18n.t("删除账户 {name}？\n该账户的本地邮件缓存将一并删除。")
-                .format(name=acc.name)):
-            return
-        self.scheduler.stop_account(acc.id)
-        self.manager.remove(acc.id)
-        db.delete_account_mails(acc.id)
-        self._account_status.pop(acc.id, None)
-        self._filter_account = None
+    def _on_account_removed(self, account_id: str):
+        """账户已由账户管理界面删除：清理界面状态并刷新。"""
+        self._account_status.pop(account_id, None)
+        if self._filter_account == account_id:
+            self._filter_account = None
         self.full_refresh()
         self.root.event_generate("<<UnreadChanged>>", when="tail")
+        self.var_status.set(i18n.t("账户已删除"))
 
     def set_status(self, text: str):
         self.var_status.set(_tr_status(text))

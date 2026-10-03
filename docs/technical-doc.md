@@ -1,6 +1,6 @@
 # OneMail — Technical Documentation
 
-> Version: v1.0｜Date: 2026-09-28｜Companion doc: [development-plan.md](development-plan.md)
+> Version: v1.11.3｜Date: 2026-10-03
 
 ## 1. Technology Stack
 
@@ -9,7 +9,7 @@
 | Language | Python 3.12 | As required; mature ecosystem |
 | Fetch protocol | IMAP4 (stdlib `imaplib`) + IMAP IDLE | IDLE is server push — no polling loops, ~0% idle CPU |
 | Mail parsing | stdlib `email` | Zero third-party deps; full MIME/attachment/encoding coverage |
-| GUI | tkinter (stdlib) | Tiny footprint — the key to "minimal resource usage" |
+| GUI | tkinter (stdlib) + ttk `clam` theme | Tiny footprint — the key to "minimal resource usage"; `clam` is fully colourable (vista/winnative cannot override widget internals, which left light widgets behind in the dark theme) |
 | Tray | pystray + Pillow | Lightweight tray icon & menu |
 | Notifications | pystray balloon (Shell_NotifyIcon) | Native bubbles, zero extra processes |
 | Storage | SQLite (stdlib `sqlite3`) | Single file, zero config |
@@ -70,17 +70,19 @@ OneMail/
 │   │   ├── database.py    # SQLite schema & access
 │   │   └── config.py      # config.json read/write
 │   ├── ui/
-│   │   ├── main_window.py # main window (accounts / local folders / mail list / reader)
+│   │   ├── main_window.py # main window (Mail panel / mail list / reader); toolbar = mail actions only
+│   │   ├── accounts_dialog.py # account manager: add/edit/remove + enable-disable (v1.11.0)
 │   │   ├── compose_window.py # compose window (CC/BCC, rich text, AI write, threaded send)
-│   │   ├── settings_dialog.py # settings: language / theme / AI (v1.9.0)
+│   │   ├── settings_dialog.py # settings, 3 tabs: Appearance / AI / Other (v1.11.0)
 │   │   ├── htmltext.py    # HTML → Tk Text rich-text renderer (incoming, v1.9.0)
 │   │   ├── imgload.py     # mail image loading (CID/remote, v1.10.0)
 │   │   ├── richtext.py    # Tk Text rich-text tags → HTML export (outgoing)
-│   │   ├── theme.py       # theme palettes: light / dark (v1.9.0)
+│   │   ├── theme.py       # theme palettes: light / dark + accent override (v1.11.0)
+│   │   ├── layout.py      # Tk-free resize math: column widths, sash clamping (v1.11.1)
 │   │   ├── i18n.py        # zh/en string table (v1.9.0)
 │   │   ├── tray.py        # tray icon, menu, unread badge
 │   │   ├── icon.py        # programmatic icon + badge rendering
-│   │   └── account_dialog.py
+│   │   └── account_dialog.py # single-account add/edit form (called by the manager)
 │   ├── notify.py          # tray balloon notifications
 │   └── autostart.py       # registry auto-start toggle
 ├── tests/                 # unit tests (parser, provider presets)
@@ -116,7 +118,13 @@ OneMail/
     "poll_interval_fallback": 300,
     "notify_sound": true,
     "start_minimized": false,
-    "accounts_collapsed": false
+    "sync_read_flags": true,
+    "language": "zh",
+    "theme": "light",
+    "theme_overrides": { "light": { "ACCENT": "#1e64dc" } },
+    "accounts_collapsed": false,
+    "local_folders": ["Work"],
+    "ai": { "base_url": "https://api.deepseek.com/v1", "model": "deepseek-chat" }
   }
 }
 ```
@@ -200,7 +208,7 @@ CREATE INDEX idx_mails_account ON mails(account_id, received_at DESC);
 - **Concurrency**: IDLE wait uses `select.select` slices (never `settimeout` on the socket — imaplib's file object is permanently poisoned after a timeout, causing a reconnect every keep-alive cycle); `stop()` closes the socket for instant worker termination; 「立即收信」 fetch-now wakes workers via an event; `_poll_events` is exception-guarded so the event chain can never silently die
 - **Parsing**: unclosed `<script>/<style>` (CDATA mode emits no events at all) is recovered from the parser buffer at the first real markup tag — broken marketing mail no longer yields empty bodies
 - **Matching**: `%`/`_` escaped in LIKE (`ESCAPE '\'`); `guess_host` uses exact/suffix-with-dot matching so `myqq.com` can't send credentials to `imap.qq.com`
-- **UI**: account editing keeps the stored auth code when the password field is left empty; richtext walks Tcl indices (emoji-safe); dialog worker threads never touch tk variables; context menus destroyed after popup; confirm dialog when closing during send
+- **UI**: account editing keeps the stored auth code when the password field is left empty; richtext walks Tcl indices (emoji-safe); dialog worker threads never touch tk variables; context menus destroyed on a delay (v1.11.3: immediate destruction swallows not-yet-dispatched menu commands); confirm dialog when closing during send
 - **Misc**: 15 s IMAP connect timeout everywhere; local delete (right-click/Delete, server untouched); outbound mail gets `Date`/`Message-ID`; 300 ms search debounce; save_to_sent decodes modified-UTF-7 folder names (163 已发送 sync finally works); single-instance treats a NULL mutex handle as failure; migration is idempotent (`DROP TABLE IF EXISTS mails_new` + `BEGIN IMMEDIATE` + missing-column fallbacks)
 
 ### 13. Incremental fetch & attachments (v1.5.0)
@@ -239,7 +247,9 @@ CREATE INDEX idx_mails_account ON mails(account_id, received_at DESC);
 ### 18. Themes (v1.9.0, theme.py)
 
 - All UI colors centralized; `light` (original blue/white) and `dark` palettes; `colors()` reads the config, each window captures it once at construction
-- Switching writes `settings.theme`, **applies after restart** (Tk widget colors are fixed at construction; a runtime full repaint is not worth the complexity)
+- **Accent override (v1.11.0)**: `settings.theme_overrides = {"<theme>": {"ACCENT": "#rrggbb"}}`. `colors()` applies the override on top of the default palette and derives the linked colors per theme — on `light`, `ACCENT_DARK` (unread text) is mixed 35% toward black and `ACCENT_SOFT` (selection background) 88% toward white; on `dark`, 55% toward white and 78% toward the background respectively (unread text must be brightened on a dark background). Invalid or missing values always fall back to the defaults, and `normalize_hex()` returns an empty string for non-string input instead of raising
+- Switching writes `settings.theme` / `theme_overrides`, **applies after restart** (Tk widget colors are fixed at construction; a runtime full repaint is not worth the complexity)
+- **Control-surface colours (v1.11.2)**: besides window/card/text, the palette defines `FIELD` (entry & dropdown background), `BTN`/`BTN_ACTIVE`/`BTN_PRESSED` (button normal/hover/pressed), `TAB` (unselected tab), `TROUGH` (scrollbar trough) and `DISABLED` (disabled text), so every ttk widget lands on a themed colour instead of the system default; `derive_palette()` keeps these keys untouched when only the accent is overridden
 
 ### 19. Languages (v1.9.0, i18n.py)
 
@@ -285,7 +295,47 @@ CREATE INDEX idx_mails_account ON mails(account_id, received_at DESC);
 ### 25. UI tweaks (v1.10.0)
 
 - The ⚙ Settings button moved to the first toolbar position (top-left)
-- The mail-list context menu gains "New Folder…" (reuses create_folder)
+- The mail-list context menu gains "New Folder…" (**moved into the Mail panel in v1.11.0**)
+
+### 26. UI organisation & centralised settings (v1.11.0)
+
+- **Tabbed settings** (settings_dialog.py): a `ttk.Notebook` with **Appearance** (language / theme / accent color), **AI**, and **Other** (launch at startup, sync-read-state toggle, open log folder). Auto-start used to be registry-only and the read-sync toggle tray-only; the tray check item is kept and reads the same config key live. Saving writes the config first (including the `autostart` boolean), then calls `theme_mod.set_accent()` for the accent override; the registry value is only touched when it differs from the real state, and a failure is reported explicitly (the checkbox is not silently reverted)
+- **Account manager** (accounts_dialog.py): a `Treeview` (name / email / auth / server / state) with Add / Edit / Remove / Enable-Disable. Boundary: the dialog only handles interaction and confirmation; removal runs `scheduler.stop_account` (stop + bounded join) → `manager.remove` → `db.delete_account_mails`. Fetch-thread lifecycle is decided in exactly one place — the main window's `_on_account_saved`, based on `acc.enabled` — so disabling an account can never restart its thread
+- **Leaner toolbar**: the account buttons were removed; it now carries only Settings / Fetch Now / Compose / Reply / Mark All Read / Mark Read / AI Summary
+- **Left panel renamed "Mail"**: holds the account list, the local-folder section and a bottom "⚙ Accounts…" entry (the bottom widget must be packed before the expanding list to claim its space); new mail folders moved here from the mail-list context menu (section header "＋ New" plus the section's context menu)
+- **Config compatibility**: `theme_overrides` is a new optional key; existing config.json needs no migration (`load()` only fills missing settings defaults and every reader is defensive)
+- **Static guards** (tests/test_static_checks.py): (1) every local import path must exist repo-wide (this round genuinely hit `from core import autostart` — autostart.py lives at the src top level); (2) an `except ... as e` variable must not be captured by a deferred lambda — Python deletes `e` when the handler exits, so the callback only raises NameError, which UI code often swallows silently ("the action failed but nothing is shown"). This guard led to fixing two such silent failures: OAuth2 sign-in and "fetch folders"
+
+### 27. Resize adaptation (v1.11.1, layout.py + main-window guards)
+
+- **Symptom**: after a window or DPI (display scaling) change, the whole mail list (Account / From / Subject / Date header row) could disappear; on narrow windows the rightmost "Date" column was clipped
+- **Root cause**: (1) `ttk.Treeview` defaults to 10 rows and `tk.Text` to 24 rows — their combined requested height (≈830 px) exceeds the usable height of the minimum window (≈410 px), so when space runs short `ttk.Panedwindow` squeezes one pane to 0 pixels (header row included); (2) column widths were fixed pixels (110/160/380/140 = 790 px) while the Treeview has no horizontal scrollbar, so a narrower container clipped the last column
+- **Fix**:
+  - Mail list `height=6`, reader `height=8` — brings the requested heights within the minimum window, removing the mutual squeeze at its source
+  - Window `<Configure>` → 120 ms debounce → `_ensure_pane_minimums()`: reads the sash position and **only corrects out-of-range values** (mail list ≥130 px, reader ≥80 px, left panel ≥170 px; shrinks proportionally via `total//3` / `total//4` in tiny windows). A `_balancing` flag prevents re-entrancy; with the panel collapsed `panes()` has one entry and `sashpos(0)` raises TclError, which is caught
+  - `_autofit_columns()`: on a tree-width change, recompute the four columns with `plan_column_widths()` (ratios 14/20/47/19 plus per-column `minwidth`), so the total matches the visible width exactly. If the width did not change it returns immediately, leaving user-dragged column widths alone
+  - Very narrow containers (below the 412 px sum of minimums) fall back to the minimums, with a new horizontal scrollbar as a safety net
+- **Testability**: the math moved to `ui/layout.py` (`plan_column_widths` / `clamp_sash` / `pane_minimums`, Tk-free); `tests/test_layout.py` (17 cases) pins the reported scenario as assertions
+
+### 28. Complete theme coverage (v1.11.2)
+
+- **Symptom**: after switching to the dark theme, entries / comboboxes / buttons / checkbuttons / tabs / scrollbars / context menus / dialog edges were still light
+- **Root cause**: (1) `_setup_style` only configured Frame/Label/Treeview, leaving the other ttk widgets on the **native system theme**, whose internal colours cannot be overridden through `ttk.Style`; (2) `tk.Menu` and the Combobox popdown listbox are drawn by Tk natively and live **outside the ttk style system**; (3) Toplevel backgrounds were never set — a ttk.Frame only covers the content area, so the edges showed the system colour; (4) scattered hardcoded `foreground="#888"`
+- **Fix**:
+  - Switch to the fully colourable **`clam`** theme; configure `TButton / TEntry / TSpinbox / TCombobox / TCheckbutton / TRadiobutton / TNotebook(+Tab) / TScrollbar / Treeview(+Heading) / TFrame / TLabel / TPanedwindow / Sash / TSeparator / TLabelframe` per class, with `active/pressed/disabled/readonly/focus` state mappings (including `lightcolor/darkcolor`, otherwise white bevel edges leak when pressed)
+  - `tk.Menu` and `*TCombobox*Listbox` are coloured through the **option database** (neither has a `ttk.Style` channel)
+  - New `theme.window_colors(win)` applies the theme background to the account manager / account editor / settings / compose / AI-write / AI-summary windows (the function does not import tkinter, so the theme module stays importable without it)
+  - Palette gains control-surface colours `FIELD / BTN / BTN_ACTIVE / BTN_PRESSED / TAB / TROUGH / DISABLED`, filled for both themes
+- **Known boundary**: `messagebox` / `filedialog` / `colorchooser` are Windows native dialogs whose colours come from the system and its theme — Tk cannot style them (they follow the system when it is dark)
+- **Regression guards**: (1) palette-integrity assertions in `tests/test_v111.py` (identical key sets, valid hex, dark brightness ceiling/floor, minimum text contrast, accent overrides keep new keys); (2) a new repo-wide scan in `tests/test_static_checks.py` forbidding colour literals outside the palette definition
+
+### 29. Context-menu popup timing (v1.11.3)
+
+- **Symptom**: right-clicking a mail and choosing "Delete (local cache only)" did nothing — the mail was never deleted. Copy / mark-unread / move to folder / new & delete folder / account context menus / reading-pane attachments & AI summary were **all affected**
+- **Root cause**: on Windows, Tk invokes a menu item's command asynchronously **after** `tk_popup` returns (dispatched via the event queue once the `TrackPopupMenu` modal loop ends). The old code called `menu.destroy()` immediately after `tk_popup` ("destroy after use"), wiping out the queued commands together with the menu — the callback never fired and nothing was reported. The pattern had been in place since v1.8.1
+- **Diagnosis**: real-GUI automation (injected right-click → `FindWindow("#32768")` to get the menu window's actual rect → precise click on the Delete item) proved the callback never ran; a minimal isolated experiment compared immediate / delayed / no destruction and only delayed destruction dispatched commands correctly
+- **Fix**: new `MainWindow._popup_menu(menu, event)` as the single popup path (`tk_popup` → `grab_release` → `after(500, destroy)`); all four context menus now go through it
+- **Regression guard**: a static check in `tests/test_static_checks.py` — `tk_popup` may appear exactly once in the codebase (inside `_popup_menu`) and must not be immediately followed by `destroy()`
 
 ## 6. Runtime & Data Locations
 
@@ -312,4 +362,7 @@ Build: `pyinstaller build.spec --noconfirm` → `dist/OneMail.exe`.
 8. **v1.9.0 tests** (test_v19.py, offline): body_html parsing & DB round-trip, local folder move/counts/move-back, AI build_request validation, i18n fallback & English coverage check
 9. **UI smoke** (tools/ui_smoke.py): search debounce, filters, sorting, open-mail rendering, account status — full chain green
 10. **v1.10.0 tests** (test_oauth2.py, offline): PKCE, auth URLs, token request/response handling, expiry/refresh decision, XOAUTH2 string, token store round-trip, image magic/CID/data-URI, img placeholder rendering
-10. **Packaged exe**: boots to tray, connects, fetches, no stderr output
+11. **v1.11.0 tests** (test_v111.py, offline): accent normalisation / mixing / light-dark derivation, override read-write (including invalid values and damaged config), per-theme isolation, `_EN` duplicate-key detection, source-level checks of the account-manager and settings structure
+12. **Static guards** (test_static_checks.py, offline, repo-wide): local import paths must resolve; no `except ... as e` variable captured by a lambda
+13. **v1.11.1 resize tests** (test_layout.py, offline): column-width allocation (no zero-width column even in a very narrow container), sash clamping (including a pathological 3 px position), dynamic minimum shrinking, and the reported "header row disappeared" scenario as assertions
+14. **Packaged exe**: boots to tray, connects, fetches, no stderr output

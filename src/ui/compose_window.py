@@ -49,7 +49,7 @@ class ComposeWindow:
         self.win.title(i18n.t("写邮件 · 一邮通"))
         self.win.geometry("640x600")
         self.win.minsize(520, 460)
-        self.win.configure(background=CARD)
+        theme_mod.window_colors(self.win, self.C)   # 窗口底跟随主题（v1.11.2）
         self.win.transient(root)
 
         frm = ttk.Frame(self.win, style="Card.TFrame")
@@ -185,12 +185,14 @@ class ComposeWindow:
         dlg = tk.Toplevel(self.win)
         dlg.title(i18n.t("AI 写信"))
         dlg.geometry("460x220")
+        theme_mod.window_colors(dlg, self.C)        # 跟随主题（v1.11.2）
         dlg.transient(self.win)
         dlg.grab_set()
         ttk.Label(dlg, text=i18n.t("请描述要写的邮件内容：")).pack(
             anchor="w", padx=12, pady=(10, 4))
         txt = tk.Text(dlg, font=FONT_UI, wrap="word", height=6, bd=1,
-                      relief="solid")
+                      relief="solid", bg=self.C["CARD"], fg=self.C["TEXT"],
+                      insertbackground=self.C["TEXT"])
         txt.pack(fill="both", expand=True, padx=12)
         txt.focus_set()
         var = tk.StringVar()
