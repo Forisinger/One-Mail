@@ -263,6 +263,12 @@ class MailClient:
         else:
             if self._stop.is_set():
                 return False   # 停止/暂停打断：不改 idle_supported（可复用账户对象）
+            # 超时转轮询前尽力完成 IDLE 交互（吞异常）：不补 DONE 会遗留
+            # 挂起 tag，后续命令可能读到迟到的 tagged 响应而 abort 重连
+            try:
+                conn.send(b"DONE\r\n")
+            except Exception:
+                pass
             self.account.idle_supported = False
             return False
 

@@ -231,7 +231,14 @@ class _CallbackHandler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
         q = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(q.query)
-        self.server.result = {k: v[0] for k, v in params.items() if v}
+        result = {k: v[0] for k, v in params.items() if v}
+        # 只接受带 code/error 的回调：favicon.ico 等无参请求（或本机其他
+        # 进程探测）先到时不得覆盖授权结果、不得置位 done（v1.11.4）
+        if "code" not in result and "error" not in result:
+            self.send_response(404)
+            self.end_headers()
+            return
+        self.server.result = result
         ok = "code" in self.server.result
         msg = "ok" if ok else self.server.result.get("error", "unknown error")
         page = (SUCCESS_PAGE if ok else FAILURE_PAGE).format(msg=msg)
@@ -369,6 +376,11 @@ def smtp_auth(srv, account, access_token: str) -> None:
         return
     if code == 334:
         srv.docmd("")            # 吃掉挑战并取消，让会话可干净 QUIT
-        detail = _b64.b64decode(resp + "===").decode("utf-8", "replace")[:200]
+        try:
+            # resp 是 bytes（smtplib getreply 的 errmsg），此前 bytes+str
+            # 拼接必抛 TypeError，服务器真实拒绝原因全部丢失（v1.11.4）
+            detail = _b64.b64decode(resp + b"===").decode("utf-8", "replace")[:200]
+        except Exception:
+            detail = repr(resp)[:200]
         raise OAuth2Error(f"SMTP 认证被拒: {detail}")
     raise OAuth2Error(f"SMTP 认证失败 HTTP {code}: {resp!r}"[:200])

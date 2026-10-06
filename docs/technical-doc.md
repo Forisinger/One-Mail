@@ -1,6 +1,6 @@
 # OneMail — Technical Documentation
 
-> Version: v1.11.3｜Date: 2026-10-03
+> Version: v1.11.4｜Date: 2026-10-06
 
 ## 1. Technology Stack
 
@@ -336,6 +336,25 @@ CREATE INDEX idx_mails_account ON mails(account_id, received_at DESC);
 - **Diagnosis**: real-GUI automation (injected right-click → `FindWindow("#32768")` to get the menu window's actual rect → precise click on the Delete item) proved the callback never ran; a minimal isolated experiment compared immediate / delayed / no destruction and only delayed destruction dispatched commands correctly
 - **Fix**: new `MainWindow._popup_menu(menu, event)` as the single popup path (`tk_popup` → `grab_release` → `after(500, destroy)`); all four context menus now go through it
 - **Regression guard**: a static check in `tests/test_static_checks.py` — `tk_popup` may appear exactly once in the codebase (inside `_popup_menu`) and must not be immediately followed by `destroy()`
+
+### 30. Multi-agent review fixes & keyboard usability (v1.11.4)
+
+Produced by three parallel review agents (core concurrency/protocol, UI/storage, UX enhancements); all covered by offline unit tests.
+
+**P1 fixes**:
+- **Gmail OAuth2 sending always failed**: `smtp_client.smtp_connect_and_login`'s 465 direct-SSL branch never sent `EHLO` after connecting — OAuth2's raw `AUTH XOAUTH2` bypasses the `ehlo_or_helo_if_needed` check built into `smtplib.login`, so Gmail rejected per RFC 4954 (503). Outlook uses the 587 STARTTLS branch (which sends EHLO explicitly) and was unaffected, which is why the bug stayed hidden. Fix: send `srv.ehlo()` in the 465 branch
+- **Rich-text renderer swallowed inline spaces**: `htmltext.handle_data` unconditionally dropped whitespace-only data chunks — a standalone space between `</b>` and `<i>` formed one, silently rendering `world again` as `worldagain`. Fix: only drop whitespace chunks containing newlines (indentation between block tags); newline-free separating spaces are kept as one space. CJK line-wrapping folding is unchanged
+
+**P2 fixes**:
+- **OAuth2 SMTP rejection path TypeError**: `smtp_auth`'s 334 branch evaluated `resp + "==="` (bytes + str), which always raised TypeError and lost the server's real rejection reason. Fix: `resp + b"==="` with a `repr(resp)` fallback for non-base64 challenges
+- **flag_sync dedup-key leak on invalid UIDs**: in mixed numeric+invalid batches the bad UIDs' keys were never `_forget`-ten, so later sync requests for those mails were silently swallowed forever (violating the module's own rule). Fix: release bad keys immediately upon removal
+- **`_cid_cache` cross-thread race**: two concurrent image workers could hit `StopIteration` while reading/evicting/writing the cache, killing a worker so remaining images never loaded. Fix: an instance-level `threading.Lock` guards cache access (the network fetch stays outside the lock)
+
+**P3 fixes**: the IDLE continuation 10 s timeout path now best-effort sends `DONE` (exceptions swallowed; prevents a late tagged response aborting the next command); the OAuth2 loopback callback only accepts requests carrying `code`/`error` (stray favicon GETs get 404 instead of clobbering the result); the reply-subject prefix check is case-insensitive (the old tuple repeated `"Re:"` twice); the config atomic write now flushes + fsyncs before `os.replace` (prevents a power-loss rename landing before the data blocks, which looked like "all accounts vanished")
+
+**Enhancements**: the mail-list context menu gained a Reply entry; the account manager supports Enter = edit / Delete = remove / Esc = close; the AI summary result window supports Esc to close and Ctrl+A to select all
+
+**Regression guard**: `tests/test_v114.py` with 12 cases — inline-space preservation (and CJK folding non-regression), 334 challenge base64 decode / non-base64 fallback / 235 success, invalid-UID key release (mixed / all-invalid / resubmit), callback favicon guard plus normal code/error callbacks
 
 ## 6. Runtime & Data Locations
 

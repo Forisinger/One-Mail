@@ -50,4 +50,8 @@ def save(data: dict) -> None:
     with _LOCK:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+            # flush+fsync：断电/崩溃时防止 rename 先于数据块落盘，
+            # 否则 config.json 可能变成空/截断文件，表现为账户全消失
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, _CONFIG)

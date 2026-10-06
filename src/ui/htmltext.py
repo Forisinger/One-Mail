@@ -185,7 +185,11 @@ class _Renderer(HTMLParser):
                 return " "
             text = re.sub(r"\s+", _fold, data)
             if not text.strip():
-                return  # 纯空白（缩进/换行）不插入，排版由块级标签负责
+                if "\n" in data:
+                    return  # 块级标签间的缩进/换行不插入，排版由块级标签负责
+                # 不含换行的独立空格（内联标签之间的分隔）必须保留——
+                # 此前无条件丢弃导致 <b>x</b> <i>y</i> 渲染成 "xy"（v1.11.4）
+                text = " "
         self.w.insert("end", text, self._tags_for(self.style))
 
     # ---------- 图片（v1.10.0）：插占位符并登记，交给 imgload 异步回填 ----------

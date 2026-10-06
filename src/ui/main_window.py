@@ -222,6 +222,8 @@ class MainWindow:
         self._sort_desc = True
         self._col_titles = {}
         self._current_mail = None    # 阅读区当前邮件（附件/AI 总结用）
+        self._cid_cache: dict = {}   # CID 内嵌图原文缓存（会话级，64MB 限界）
+        self._cid_lock = threading.Lock()   # 图片 worker 并发访问缓存（v1.11.4）
         self._account_status: dict[str, str] = {}   # 账户最近连接状态（v1.6.2）
         self._account_rows: list[tuple[tk.Frame, str | None]] = []
         self._folder_rows: list[tk.Frame] = []
@@ -939,21 +941,27 @@ class MainWindow:
             nonlocal n_loaded
             cmap = {}
             if need_raw and acc is not None:
-                # 会话级缓存：来回切同一封邮件不重复 IMAP 拉整封原文
-                cmap = getattr(self, "_cid_cache", {}).get(mail_id)
+                # 会话级缓存：来回切同一封邮件不重复 IMAP 拉整封原文。
+                # 多个图片 worker 并发时读/淘汰/回写必须在锁内——
+                # 并发 iter/pop 会 StopIteration 杀死 worker（v1.11.4）
+                with self._cid_lock:
+                    cmap = self._cid_cache.get(mail_id)
                 if cmap is None:
                     try:
                         from core.mail_client import MailClient
                         cmap = imgload.cid_map_from_raw(
                             MailClient.fetch_raw(acc, pwd, folder, uid))
-                        cache = getattr(self, "_cid_cache", {})
-                        # 按字节总量限界：图片字节常驻内存，防托盘长年运行膨胀
-                        total = sum(len(v) for m in cache.values() for v in m.values())
-                        while cache and total + sum(len(v) for v in cmap.values()) > 64 * 1024 * 1024:
-                            total -= sum(len(v) for v in next(iter(cache.values())).values())
-                            cache.pop(next(iter(cache)))
-                        cache[mail_id] = cmap
-                        self._cid_cache = cache
+                        with self._cid_lock:
+                            cache = self._cid_cache
+                            # 按字节总量限界：图片字节常驻内存，防托盘长年运行膨胀
+                            total = sum(len(v) for m in cache.values()
+                                        for v in m.values())
+                            while cache and (total + sum(len(v) for v in cmap.values())
+                                             > 64 * 1024 * 1024):
+                                total -= sum(
+                                    len(v) for v in next(iter(cache.values())).values())
+                                cache.pop(next(iter(cache)))
+                            cache[mail_id] = cmap
                     except Exception:
                         cmap = {}
             for tag, src in images:
@@ -1044,6 +1052,8 @@ class MainWindow:
                              state="normal" if val.strip() else "disabled",
                              command=lambda v=val, l=key[2:]: self._copy_to_clipboard(v, l))
         menu.add_separator()
+        menu.add_command(label=i18n.t("回复"),
+                         command=self.compose_reply)
         menu.add_command(label=i18n.t("标记为未读"),
                          command=self.mark_selected_unread)
         # 新建文件夹已移入左侧「邮件管理」栏（v1.11.0），此处只留"移动到"的目的地
@@ -1072,6 +1082,8 @@ class MainWindow:
         if not sel:
             return
         mail_id = int(sel[0])
+        # 记住位置，删除后选中跟随到相邻行（键盘连续清理不断流，v1.11.4）
+        idx = self.tree.index(sel[0])
         db.delete_mail(mail_id)
         if self._current_mail and self._current_mail["id"] == mail_id:
             self._current_mail = None
@@ -1079,6 +1091,12 @@ class MainWindow:
             self.txt_body.delete("1.0", "end")
             self.txt_body.configure(state="disabled")
         self.refresh_mails()
+        kids = self.tree.get_children()
+        if kids:
+            new_sel = kids[min(idx, len(kids) - 1)]
+            self.tree.selection_set(new_sel)
+            self.tree.focus(new_sel)
+            self.tree.see(new_sel)
         self.refresh_accounts()
         self.var_status.set(i18n.t("已从本地缓存删除该邮件（服务器不受影响）"))
 
@@ -1297,6 +1315,10 @@ class MainWindow:
         txt.pack(fill="both", expand=True)
         txt.insert("1.0", text)
         txt.configure(state="disabled")
+        # Esc 关窗 / Ctrl+A 全选（Tk Text 默认没有 Ctrl+A，Windows 老坑）
+        win.bind("<Escape>", lambda e: win.destroy())
+        txt.bind("<Control-a>", lambda e: (txt.tag_add("sel", "1.0", "end"),
+                                           "break")[1])
         bar = tk.Frame(win, bg=self.C["CARD"])
         bar.pack(fill="x")
         ttk.Button(bar, text=i18n.t("复制结果"),
@@ -1407,7 +1429,7 @@ class MainWindow:
         acc = self.manager.get(mail["account_id"])
         reply_to = mail["from_addr"] or ""
         subj = mail["subject"] or ""
-        if subj and not subj.startswith(("回复：", "回复:", "Re:", "Re:")):
+        if subj and not subj.lower().startswith(("回复：", "回复:", "re:")):
             subj = i18n.t("回复：{subj}").format(subj=subj)
         quote = (f"\n\n-------- {i18n.t('原始邮件')} --------\n"
                  f"{i18n.t('发件人')}：{mail['from_name'] or reply_to} <{reply_to}>\n"

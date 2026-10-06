@@ -108,6 +108,7 @@ Details in the docs: [Technical Documentation](docs/technical-doc.md) · [中文
 - [x] OAuth2 for Gmail/Outlook ✅ v1.10.0
 - [x] Centralised settings (Appearance/AI/Other), account manager dialog, left panel renamed "Mail" ✅ v1.11.0
 - [x] Full dark-theme coverage, resize-adaptive column widths; fixed context-menu clicks doing nothing (delete mail etc.) ✅ v1.11.3
+- [x] Fixed Gmail OAuth2 sending (missing EHLO on 465) and rich-text inline-space loss from the review round; context-menu reply, keyboard support in account manager & AI result window ✅ v1.11.4
 
 ## 📄 License
 

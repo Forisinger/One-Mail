@@ -43,6 +43,9 @@ def smtp_connect_and_login(account: Account, password: str, timeout: float):
     try:
         if port == 465:
             srv = _smtplib.SMTP_SSL(host, port, timeout=timeout, context=ctx)
+            # 显式 EHLO：OAuth2 的 raw AUTH 前没有 smtplib.login 内置的
+            # ehlo_or_helo_if_needed，缺这行 Gmail(465) 发信必被 503 拒绝
+            srv.ehlo()
         else:
             srv = _smtplib.SMTP(host, port, timeout=timeout)
             srv.ehlo()

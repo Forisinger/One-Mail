@@ -21,6 +21,7 @@ _EN = {
     "⟳ 立即收信": "⟳ Fetch Now",
     "✉ 写邮件": "✉ Compose",
     "↩ 回复": "↩ Reply",
+    "回复": "Reply",
     "✓ 全部已读": "✓ Mark All Read",
     "＋ 添加账户": "＋ Add Account",
     "✎ 编辑账户": "✎ Edit Account",
@@ -244,7 +245,8 @@ _EN = {
     "⚙ 账户管理…": "⚙ Accounts…",
     "账户管理…": "Accounts…",
     "账户管理": "Account Manager",
-    "账户列表（双击编辑）": "Accounts (double-click to edit)",
+    "账户列表（双击编辑，Enter 编辑 / Delete 删除）":
+        "Accounts (double-click or Enter to edit, Delete to remove)",
     "显示名": "Display Name",
     "邮箱": "Email",
     "认证": "Auth",

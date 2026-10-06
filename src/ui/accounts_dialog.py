@@ -46,8 +46,8 @@ class AccountsDialog(tk.Toplevel):
         wrap = ttk.Frame(self, padding=(12, 10))
         wrap.pack(fill="both", expand=True)
 
-        ttk.Label(wrap, text=i18n.t("账户列表（双击编辑）")).pack(anchor="w",
-                                                              pady=(0, 6))
+        ttk.Label(wrap, text=i18n.t("账户列表（双击编辑，Enter 编辑 / Delete 删除）")).pack(
+            anchor="w", pady=(0, 6))
         cols = ("name", "email", "auth", "server", "state")
         self.tree = ttk.Treeview(wrap, columns=cols, show="headings",
                                  selectmode="browse")
@@ -66,6 +66,10 @@ class AccountsDialog(tk.Toplevel):
         self.tree.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
         self.tree.bind("<Double-1>", lambda e: self.edit_account())
+        # 键盘操作：Enter=编辑、Delete=删除、Esc=关闭（v1.11.4）
+        self.tree.bind("<Return>", lambda e: self.edit_account())
+        self.tree.bind("<Delete>", lambda e: self.remove_account())
+        self.bind("<Escape>", lambda e: self.destroy())
 
         btns = ttk.Frame(self, padding=(12, 0, 12, 10))
         btns.pack(fill="x")

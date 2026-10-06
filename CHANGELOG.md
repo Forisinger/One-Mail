@@ -4,6 +4,33 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/)。
 
+## [1.11.4] — 2026-10-06
+
+多路代码审查修复轮：Gmail OAuth2 发信、富文本渲染与若干并发/健壮性加固。
+
+### Fixed · 修复
+
+- **Gmail OAuth2 发信必然失败**（P1）：SMTP 465 直连分支建连后缺少 `EHLO`——OAuth2 的 raw `AUTH XOAUTH2` 没有走 `smtplib.login` 内置的 EHLO 检查，Gmail 按 RFC 4954 直接拒绝（503 Error: send HELO/EHLO first）。Outlook（587 STARTTLS 分支显式发过 EHLO）不受影响，因此此前被掩盖。465 分支现补发 EHLO
+- **富文本渲染吞掉内联标签之间的空格**（P1）：`<b>x</b> <i>y</i>` 之间的独立空格作为纯空白块被无条件丢弃，渲染成 `xy` 单词拼连且静默发生。现在仅丢弃含换行的纯空白（块级标签间缩进），不含换行的分隔空格保留。CJK 间换行仍折叠为无空格（v1.10.1 行为不变）
+- **OAuth2 SMTP 拒绝路径必抛 TypeError**：`resp + "==="` 是 bytes+str 拼接（smtplib `getreply` 返回 bytes），334 挑战即崩溃——精心准备的服务器错误详情（`invalid_grant`/scope 不足）全部丢失，UI 只能看到天书。已修 + 非 base64 挑战兜底
+- **已读同步非法 UID 去重键泄漏**：数字+非法 UID 混批时，非法 UID 的键从不释放，该邮件后续所有同步请求被永久静默拦截——违反本模块"任何异常路径必须释放键"的红线。现剔除时立即释放
+- **CID 图片缓存跨线程竞态**：两个图片 worker 并发读/淘汰/回写 `_cid_cache` 时可能 `StopIteration` 杀死 worker（该邮件剩余图片永不加载）。现以实例锁保护缓存读写
+- **IDLE 续行 10s 超时遗留挂起 tag**：转轮询前未完成 IDLE 交互，迟到 tagged 响应可能导致下一条命令 abort 重连。超时路径现尽力补发 `DONE`（吞异常）
+- **OAuth2 回调被杂散请求覆盖**：favicon 等无参 GET 先到会清空授权结果并置位 done，导致授权报"回调参数不合法"。现仅接受带 `code`/`error` 的请求，其余回 404
+- **回复主题前缀判断笔误**：`"Re:"` 重复出现两次，`RE:` 主题会叠加双重前缀。改为大小写不敏感判断
+- **config.json 原子写缺 fsync**：断电时 rename 可能先于数据块落盘，配置变空文件表现为"账户全消失"。写临时文件后 flush + fsync 再 replace
+
+### Added · 新增
+
+- 邮件列表右键菜单新增「回复」（复用顶栏回复逻辑）
+- 删除邮件后选中自动跟随到相邻行，键盘连续清理不再断流
+- 账户管理界面键盘操作：Enter=编辑、Delete=删除（自带确认）、Esc=关闭
+- AI 总结结果窗：Esc 关闭、Ctrl+A 全选（Tk Text 在 Windows 默认没有 Ctrl+A）
+
+### Tests · 测试
+
+- 新增 `tests/test_v114.py` 12 项：内联空格保留与 CJK 折行不回归、334 挑战 base64 解码/非 base64 兜底/235 成功、非法 UID 键释放（混批/整批/重提交）、回调 favicon 防御与正常 code/error 回调
+
 ## [1.11.3] — 2026-10-03
 
 修复右键菜单点击无效的 bug（右键删除邮件无法删除）。

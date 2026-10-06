@@ -124,6 +124,9 @@ class FlagSync:
         bad = set(all_uids) - set(uids)
         if bad:
             self._log(f"flag_sync: 非法 UID 已剔除: {sorted(bad)[:5]}")
+            # 非法 UID 的去重键也必须释放，否则该邮件后续所有同步请求
+            # 会被 _pending 永久静默拦截（键泄漏红线，v1.11.4）
+            self._forget(account_id, folder, sorted(bad), seen)
         if not uids:
             self._forget(account_id, folder, all_uids, seen)
             return

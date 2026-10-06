@@ -4,6 +4,33 @@ All notable changes to **OneMail** are documented here. (中文版见 [CHANGELOG
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.11.4] — 2026-10-06
+
+Multi-agent code-review round: Gmail OAuth2 sending, rich-text rendering, plus several concurrency & robustness fixes.
+
+### Fixed
+
+- **Gmail OAuth2 sending always failed** (P1): the SMTP 465 direct-SSL branch never sent `EHLO` — OAuth2's raw `AUTH XOAUTH2` bypasses the EHLO check built into `smtplib.login`, so Gmail rejected with `503 Error: send HELO/EHLO first`. Outlook (587 STARTTLS branch already sends EHLO) was unaffected, which is why this stayed hidden. The 465 branch now sends EHLO
+- **Rich-text renderer swallowed spaces between inline tags** (P1): a standalone space between `</b>` and `<i>` arrived as a whitespace-only data chunk and was unconditionally dropped, silently rendering `world again` as `worldagain`. Now only whitespace chunks containing newlines (indentation between block tags) are dropped; newline-free separating spaces are kept. CJK line-wrapping is still folded without spaces (v1.10.1 behavior unchanged)
+- **OAuth2 SMTP rejection path always raised TypeError**: `resp + "==="` concatenated bytes + str (smtplib's `getreply` returns bytes), crashing exactly on the 334 challenge — the carefully prepared server rejection details (`invalid_grant` / missing scope) were lost, with only a cryptic message reaching the UI. Fixed, with a fallback for non-base64 challenges
+- **Flag-sync dedup key leak on invalid UIDs**: in a mixed batch of numeric + invalid UIDs, the invalid UIDs' keys were never released, so any later sync request for those mails was silently swallowed forever — violating this module's own "every exceptional path must release its keys" rule. Keys are now released immediately upon removal
+- **CID image cache cross-thread race**: two concurrent image workers could `StopIteration` while reading/evicting/writing `_cid_cache`, killing the worker so remaining images of that mail never loaded. Cache access is now guarded by an instance lock
+- **IDLE continuation timeout left a pending tag**: switching to polling after the 10 s wait never finished the IDLE exchange; a late tagged response could abort the next command with an extra reconnect. The timeout path now best-effort sends `DONE`
+- **OAuth2 loopback callback could be clobbered by stray requests**: a parameterless GET (favicon etc.) arriving first cleared the auth result and set `done`, making authorization fail with "invalid callback parameters". Only requests carrying `code`/`error` are accepted now; anything else gets a 404
+- **Reply-subject prefix check typo**: `"Re:"` appeared twice instead of a case variant, so subjects already starting with `RE:` got a doubled prefix. Now case-insensitive
+- **config.json atomic write lacked fsync**: on power loss the rename could hit disk before the data blocks, leaving an empty/truncated config that looked like "all accounts vanished". The temp file is now flushed + fsynced before replace
+
+### Added
+
+- Mail-list context menu gained a Reply entry (reuses the toolbar reply flow)
+- After deleting a mail the selection follows to the neighbouring row, so keyboard-driven cleanup keeps flowing
+- Account manager keyboard support: Enter = edit, Delete = remove (with confirmation), Esc = close
+- AI summary result window: Esc to close, Ctrl+A to select all (Tk Text has no default Ctrl+A on Windows)
+
+### Tests
+
+- New `tests/test_v114.py` with 12 cases: inline-space preservation (and CJK folding non-regression), 334 challenge base64 decoding / non-base64 fallback / 235 success, invalid-UID key release (mixed / all-invalid / resubmit), callback favicon guard plus normal code/error callbacks
+
 ## [1.11.3] — 2026-10-03
 
 Fix context-menu clicks silently doing nothing (right-click delete-mail not working).
