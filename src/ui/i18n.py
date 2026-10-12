@@ -274,6 +274,33 @@ _EN = {
         "Sync read state to server (off = local only)",
     "开机自启设置失败（可能被安全软件拦截）":
         "Failed to set autostart (blocked by security software?)",
+    # ---- 设置页签 · 帮助（v1.11.5） ----
+    "帮助": "Help",
+    "添加邮箱账户": "Add a mail account",
+    "「邮件管理」栏 → ⚙ 账户管理… → ＋ 添加账户，填入邮箱地址、授权码与服务器信息。":
+        "Mail sidebar → ⚙ Accounts… → ＋ Add Account, then fill in your email, "
+        "auth code and server info.",
+    "QQ / 163 / 126 等国内邮箱：先在网页邮箱设置中开启 IMAP 和 SMTP 服务，密码处填「授权码」（不是登录密码），收发共用同一授权码。":
+        "QQ / 163 / 126 and other Chinese providers: enable IMAP and SMTP in "
+        "webmail settings first, and use the authorization code (not your login "
+        "password) — the same code for both sending and receiving.",
+    "Gmail / Outlook：认证方式选 OAuth2，填入你在 Google Cloud Console / Azure 注册应用的 Client ID，点「浏览器登录」完成授权。":
+        "Gmail / Outlook: choose OAuth2 as the auth method, enter the Client ID "
+        "of an app you registered in Google Cloud Console / Azure, then click "
+        "\"Sign in via Browser\" to authorize.",
+    "AI 总结 / AI 写信": "AI Summary / AI Write",
+    "在「AI 功能」页签填入 API 地址（OpenAI 兼容接口，如 https://api.deepseek.com/v1）、模型名与 API Key。":
+        "Fill in the API base URL (any OpenAI-compatible API, e.g. "
+        "https://api.deepseek.com/v1), model name and API Key on the \"AI\" tab.",
+    "API Key 经 Windows DPAPI 加密，只存在本机。":
+        "The API Key is encrypted with Windows DPAPI and never leaves this PC.",
+    "收不到 / 发不出邮件？": "Can't receive / send mail?",
+    "检查授权码是否正确、IMAP / SMTP 服务是否已在邮箱网页设置中开启。":
+        "Check that the auth code is correct and IMAP / SMTP are enabled in "
+        "your webmail settings.",
+    "打开「其他」页签的「打开日志文件夹」，查看 onemail.log 中的错误详情。":
+        "Use \"Open Log Folder\" on the \"Other\" tab and check onemail.log "
+        "for error details.",
 }
 
 

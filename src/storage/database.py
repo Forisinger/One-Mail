@@ -124,18 +124,35 @@ def _conn() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+def _ensure_columns(conn: sqlite3.Connection) -> None:
+    """旧库增列兼容（须在 _SCHEMA 之前执行）。
+
+    _SCHEMA 里 `CREATE INDEX idx_mails_local ON mails(local_folder)` 依赖
+    local_folder 列——v1.3~v1.8 的库有 folder 列（_migrate 会提前返回）却
+    缺 v1.9.0 新增的 local_folder，若先建索引会报
+    "no such column: local_folder" 且程序无法启动。所以顺序必须是：
+    先补列，再跑 _SCHEMA。
+    """
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='mails'").fetchone()
+    if not exists:
+        return  # 全新库：_SCHEMA 建表时自带全部列
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(mails)")}
+    if "attachment_names" not in cols:   # v1.5.0 新增
+        conn.execute("ALTER TABLE mails ADD COLUMN attachment_names TEXT")
+    if "body_html" not in cols:          # v1.9.0 新增
+        conn.execute("ALTER TABLE mails ADD COLUMN body_html TEXT")
+    if "local_folder" not in cols:       # v1.9.0 新增
+        conn.execute("ALTER TABLE mails ADD COLUMN local_folder TEXT DEFAULT ''")
+
+
 def init() -> None:
     with _LOCK, _conn() as conn:
         _migrate(conn)
+        _ensure_columns(conn)   # 旧库先补列：_SCHEMA 建索引依赖 local_folder
         conn.executescript(_SCHEMA)
-        # 增列兼容：attachment_names 为 v1.5.0 新增；body_html / local_folder 为 v1.9.0 新增
-        cols = {r["name"] for r in conn.execute("PRAGMA table_info(mails)")}
-        if "attachment_names" not in cols:
-            conn.execute("ALTER TABLE mails ADD COLUMN attachment_names TEXT")
-        if "body_html" not in cols:
-            conn.execute("ALTER TABLE mails ADD COLUMN body_html TEXT")
-        if "local_folder" not in cols:
-            conn.execute("ALTER TABLE mails ADD COLUMN local_folder TEXT DEFAULT ''")
+        # 全新库由 _SCHEMA 建表（不含 attachment_names），再补一次（幂等）
+        _ensure_columns(conn)
 
 
 # 增量收信状态表建表语句已并入 _SCHEMA（见 init）

@@ -4,6 +4,23 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/)。
 
+## [1.11.5] — 2026-10-12
+
+设置对话框新增「帮助」页签：把散在 README 里的邮箱配置要点收进应用内。
+
+### Fixed · 修复
+
+- **旧库启动即崩 "no such column: local_folder"（P1）**：v1.3~v1.8 的数据库有 `folder` 列（`_migrate` 据此提前返回）但缺 v1.9.0 新增的 `local_folder`，而 `_SCHEMA` 里的 `CREATE INDEX idx_mails_local ON mails(local_folder)` 在补列**之前**执行，导致双击 exe 直接崩溃。修复：补列逻辑抽成 `_ensure_columns` 并挪到 `_SCHEMA` 之前执行（先补列、再建索引）
+
+### Added · 新增
+
+- **设置 → 帮助页签**：只读指引文本，随主题着色（深浅两套都适配），含三节——
+  - 添加邮箱账户：入口路径；QQ/163/126 等国内邮箱需先在网页开启 IMAP 和 SMTP、密码处填「授权码」而非登录密码；Gmail/Outlook 选 OAuth2 并注册应用拿 Client ID 后「浏览器登录」
+  - AI 总结 / AI 写信：OpenAI 兼容接口的地址 / 模型 / Key 填法，Key 经 DPAPI 加密只存本机
+  - 收不到 / 发不出邮件：排查授权码与 IMAP/SMTP 开关，引导用「其他」页签的「打开日志文件夹」看 onemail.log
+- 文案走 i18n（键=中文原文，英文表已全量补齐，缺键自动回退中文不崩）
+- 「帮助」页签无任何可保存状态，`_save` 逻辑零改动
+
 ## [1.11.4] — 2026-10-06
 
 多路代码审查修复轮：Gmail OAuth2 发信、富文本渲染与若干并发/健壮性加固。

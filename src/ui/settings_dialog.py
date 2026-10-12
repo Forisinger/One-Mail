@@ -5,6 +5,8 @@
 - 外观：语言 / 主题 / 强调色（可自定义并恢复默认）
 - AI 功能：OpenAI 兼容接口的 base_url / model / API Key
 - 其他：开机自启（原先只能改注册表）、同步已读到服务器（原先只在托盘）、打开日志文件夹
+- 帮助（v1.11.5）：邮箱配置指引（授权码 / OAuth2）、AI 配置说明、收发失败自助排查
+  （只读 Text，随主题着色，无任何可保存状态）
 
 语言与主题/强调色写入 config 后提示**重启生效**（tkinter 控件颜色与文案在
 构造时固化，运行时全量重绘的复杂度远超收益）。
@@ -49,6 +51,7 @@ class SettingsDialog(tk.Toplevel):
         self._tab_appearance(nb, cfg)
         self._tab_ai(nb, cfg)
         self._tab_misc(nb, cfg)
+        self._tab_help(nb)
 
         btns = ttk.Frame(self)
         btns.pack(fill="x", padx=12, pady=(0, 10))
@@ -218,6 +221,56 @@ class SettingsDialog(tk.Toplevel):
             os.startfile(data_dir())   # noqa: S606 Windows 专属项目
         except Exception:
             pass
+
+    # ---------- 帮助（v1.11.5） ----------
+    # 只读指引文本：邮箱配置 / AI 配置 / 收发失败排查。
+    # 文案走 i18n（键=中文原文，英文表缺键回退中文，永不抛错）。
+    _HELP_SECTIONS = [
+        ("添加邮箱账户", [
+            "「邮件管理」栏 → ⚙ 账户管理… → ＋ 添加账户，填入邮箱地址、授权码与服务器信息。",
+            "QQ / 163 / 126 等国内邮箱：先在网页邮箱设置中开启 IMAP 和 SMTP 服务，"
+            "密码处填「授权码」（不是登录密码），收发共用同一授权码。",
+            "Gmail / Outlook：认证方式选 OAuth2，填入你在 Google Cloud Console / "
+            "Azure 注册应用的 Client ID，点「浏览器登录」完成授权。",
+        ]),
+        ("AI 总结 / AI 写信", [
+            "在「AI 功能」页签填入 API 地址（OpenAI 兼容接口，如 https://api.deepseek.com/v1）、"
+            "模型名与 API Key。",
+            "API Key 经 Windows DPAPI 加密，只存在本机。",
+        ]),
+        ("收不到 / 发不出邮件？", [
+            "检查授权码是否正确、IMAP / SMTP 服务是否已在邮箱网页设置中开启。",
+            "打开「其他」页签的「打开日志文件夹」，查看 onemail.log 中的错误详情。",
+        ]),
+    ]
+
+    def _tab_help(self, nb: ttk.Notebook):
+        c = self.C
+        frm = ttk.Frame(nb, padding=14)
+        nb.add(frm, text=i18n.t("帮助"))
+        frm.rowconfigure(0, weight=1)
+        frm.columnconfigure(0, weight=1)
+
+        txt = tk.Text(frm, width=64, height=14, wrap="word", relief="flat",
+                      bd=0, padx=8, pady=8, cursor="arrow",
+                      bg=c["FIELD"], fg=c["TEXT"],
+                      highlightthickness=1, highlightbackground=c["BORDER"],
+                      highlightcolor=c["BORDER"], state="normal")
+        sb = ttk.Scrollbar(frm, command=txt.yview)
+        txt.configure(yscrollcommand=sb.set)
+        txt.grid(row=0, column=0, sticky="nwe")
+        sb.grid(row=0, column=1, sticky="ns")
+
+        txt.tag_configure("h", font=("TkDefaultFont", 10, "bold"),
+                          foreground=c["ACCENT"])
+        for i, (heading, lines) in enumerate(self._HELP_SECTIONS):
+            if i:
+                txt.insert("end", "\n")
+            txt.insert("end", i18n.t(heading) + "\n", "h")
+            for line in lines:
+                txt.insert("end", i18n.t(line) + "\n")
+        txt.configure(state="disabled")   # 纯展示，禁止编辑
+
 
     # ---------- 保存 ----------
     def _save(self):
