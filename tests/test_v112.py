@@ -206,5 +206,42 @@ class HtmlTextTests(unittest.TestCase):
         self.assertIn("    • 内层", content)
 
 
+class I18nCompletenessTests(unittest.TestCase):
+    """i18n 键完整性：AST 扫描 t("...") 字面量，断言都在英文表中。
+
+    缺键不会崩（回退中文），但英文界面会冒出中文串——静默退化，
+    只能靠这类静态测试兜住。
+    """
+
+    def test_all_literal_keys_translated(self):
+        import ast
+        from ui import i18n
+        src_dir = os.path.join(os.path.dirname(__file__), "..", "src")
+        keys: set[str] = set()
+        for dirpath, _dirs, files in os.walk(src_dir):
+            for fn in files:
+                if not fn.endswith(".py"):
+                    continue
+                path = os.path.join(dirpath, fn)
+                with open(path, encoding="utf-8") as f:
+                    try:
+                        tree = ast.parse(f.read())
+                    except SyntaxError:
+                        continue
+                for node in ast.walk(tree):
+                    if not isinstance(node, ast.Call):
+                        continue
+                    fn_attr = node.func
+                    if not (isinstance(fn_attr, ast.Attribute)
+                            and fn_attr.attr == "t" and node.args):
+                        continue
+                    arg = node.args[0]
+                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                        keys.add(arg.value)
+        self.assertTrue(keys, "应至少扫描到一批 i18n 键")
+        missing = sorted(k for k in keys if k not in i18n._EN)
+        self.assertEqual(missing, [], f"英文表缺失的 i18n 键: {missing}")
+
+
 if __name__ == "__main__":
     unittest.main()

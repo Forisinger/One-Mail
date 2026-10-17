@@ -52,9 +52,9 @@ class App:
 
         self.flag_sync = FlagSync(
             _get_credentials,
-            # 每次现读配置：托盘开关切换后立即生效（用启动快照会让开关形同虚设）
-            enabled=lambda: config_store.load().get("settings", {}).get(
-                "sync_read_flags", True),
+            # 单设置项带 mtime 缓存：托盘开关切换落盘后自动失效，功能上
+            # 与"每次现读"一致，但不再每批次完整解析 config.json（v1.12.1）
+            enabled=lambda: config_store.get_setting("sync_read_flags", True),
             log=self._log,
         )
 

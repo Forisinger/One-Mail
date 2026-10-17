@@ -10,7 +10,13 @@ from typing import Any
 from core.security import data_dir
 
 _CONFIG = os.path.join(data_dir(), "config.json")
-_LOCK = threading.Lock()
+# RLock：get_setting 在持锁状态下调用 load()（后者也加锁）
+_LOCK = threading.RLock()
+
+# 单设置项读取的 mtime 缓存（v1.12.1）：FlagSync 的 enabled 回调每批次
+# 都会触发——原先每次都完整读盘解析 config.json
+_cached_data: dict | None = None
+_cached_mtime: float = -1.0
 
 _DEFAULT: dict[str, Any] = {
     "accounts": [],
@@ -62,6 +68,24 @@ def _backup_corrupt() -> None:
         os.replace(_CONFIG, dst)
     except OSError:
         pass
+
+
+def get_setting(key: str, default=None):
+    """读取单个设置项（按 mtime 缓存，v1.12.1）。
+
+    save() 落盘后 mtime 变化自动失效；文件不存在时 mtime=-1 也命中缓存。
+    """
+    global _cached_data, _cached_mtime
+    with _LOCK:
+        try:
+            mtime = (os.path.getmtime(_CONFIG)
+                     if os.path.exists(_CONFIG) else -1.0)
+        except OSError:
+            mtime = -1.0
+        if _cached_data is None or mtime != _cached_mtime:
+            _cached_data = load()
+            _cached_mtime = mtime
+        return _cached_data.get("settings", {}).get(key, default)
 
 
 def save(data: dict) -> None:

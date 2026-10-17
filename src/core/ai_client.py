@@ -45,25 +45,41 @@ def build_request(base_url: str, api_key: str, model: str,
 
 def chat(base_url: str, api_key: str, model: str, messages: list[dict],
          timeout: int = TIMEOUT) -> str:
-    """发起对话，返回首条回复文本。失败抛异常（由调用方提示）。"""
+    """发起对话，返回首条回复文本。失败抛异常（由调用方提示）。
+
+    429/5xx 自动退避 1 秒重试一次（限流/瞬断常见，重试成本极低）。
+    """
     req = build_request(base_url, api_key, model, messages, timeout)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            # 响应限幅：异常端点可返回任意大数据，read() 无上限会吃满内存
-            data = json.loads(resp.read(_MAX_RESPONSE).decode("utf-8", "replace"))
-    except urllib.error.HTTPError as e:
-        detail = ""
+    last_http_err: urllib.error.HTTPError | None = None
+    for attempt in (1, 2):
         try:
-            detail = e.read().decode("utf-8", "replace")[:300]
-        except Exception:
-            pass
-        raise RuntimeError(f"HTTP {e.code} {detail}") from e
-    except urllib.error.URLError as e:
-        raise RuntimeError(f"无法连接 AI 服务: {e.reason}") from e
-    except json.JSONDecodeError as e:
-        raise RuntimeError("AI 服务返回了非 JSON 内容（请检查 API 地址是否正确）") from e
-    except OSError as e:
-        raise RuntimeError(f"AI 请求网络错误: {e}") from e
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                # 响应限幅：异常端点可返回任意大数据，read() 无上限会吃满内存
+                data = json.loads(resp.read(_MAX_RESPONSE).decode(
+                    "utf-8", "replace"))
+            break
+        except urllib.error.HTTPError as e:
+            detail = ""
+            try:
+                detail = e.read().decode("utf-8", "replace")[:300]
+            except Exception:
+                pass
+            if e.code in (429, 500, 502, 503, 504) and attempt == 1:
+                import time
+                time.sleep(1.0)
+                last_http_err = e
+                continue
+            raise RuntimeError(f"HTTP {e.code} {detail}") from e
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"无法连接 AI 服务: {e.reason}") from e
+        except json.JSONDecodeError as e:
+            raise RuntimeError(
+                "AI 服务返回了非 JSON 内容（请检查 API 地址是否正确）") from e
+        except OSError as e:
+            raise RuntimeError(f"AI 请求网络错误: {e}") from e
+    else:
+        e = last_http_err
+        raise RuntimeError(f"HTTP {e.code}（重试后仍失败）") from e
     try:
         return (data["choices"][0]["message"]["content"] or "").strip()
     except (KeyError, IndexError, TypeError) as e:

@@ -64,6 +64,7 @@ class _Renderer(HTMLParser):
         self.stack: list[tuple[str, _Style]] = []
         self.skip: list[str] = []
         self._tag_no = 0
+        self._tag_cache: dict[tuple, str] = {}   # 同配置复用 tag（v1.12.1）
         self._list_stack: list[str] = []
         self._ol_counters: list[int] = []   # 与 _list_stack 对齐，ol 序号计数
         # v1.10.0：img 占位登记 [(标签名, src)]，图片由 imgload 后台加载回填
@@ -71,10 +72,20 @@ class _Renderer(HTMLParser):
         self.w.tag_configure("imgph", foreground=colors.get("GRAY", "#888888"))
 
     # ---------- 标签管理 ----------
-    def _tag(self, **conf) -> str:
+    def _tag(self, _shared: bool = True, **conf) -> str:
+        # 相同配置复用同一 tag（v1.12.1）：富文本邮件原先每个文本片段
+        # 新建最多 6 个 tag，轻松产生上千个（Tk tag 数量影响渲染性能）。
+        # 带绑定行为的标签（链接）不可复用，调用方传 _shared=False。
+        key = tuple(sorted(conf.items()))
+        if _shared:
+            cached = self._tag_cache.get(key)
+            if cached is not None:
+                return cached
         self._tag_no += 1
         name = f"ht{self._tag_no}"
         self.w.tag_configure(name, **conf)
+        if _shared:
+            self._tag_cache[key] = name
         return name
 
     def _tags_for(self, s: _Style) -> tuple:
@@ -94,7 +105,7 @@ class _Renderer(HTMLParser):
                 f.append("bold")
             tags.append(self._tag(font=tuple(f)))
         if s.link:
-            name = self._tag(foreground=self.c["ACCENT"])
+            name = self._tag(_shared=False, foreground=self.c["ACCENT"])
             # v1.12.0：链接可点击（tag_bind 绑定在每个链接标签上）
             if s.href:
                 url = s.href

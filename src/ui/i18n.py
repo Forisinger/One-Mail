@@ -230,6 +230,8 @@ _EN = {
     "搜索邮件…": "Search mails…",
     "已标记 {n} 封为已读": "Marked {n} mail(s) as read",
     "已标记 {n} 封为未读": "Marked {n} mail(s) as unread",
+    "打开附件失败: {err}": "Failed to open attachment: {err}",
+    "保存附件失败: {err}": "Failed to save attachment: {err}",
     "同步已读到服务器": "Sync Read State to Server",
     "退出": "Quit",
     "一邮通 OneMail｜未读 {n}": "OneMail | Unread {n}",

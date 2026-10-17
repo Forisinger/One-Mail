@@ -4,6 +4,22 @@ All notable changes to **OneMail** are documented here. (中文版见 [CHANGELOG
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.12.1] — 2026-10-17
+
+Polish round: parser tolerance, performance, test guardrails.
+
+### Changed
+
+- **Refined attachment defect handling**: only encoding-class defects (broken base64/QP etc.) reject an attachment — structural defects (unclosed boundaries etc.) are common in real marketing mails with perfectly intact attachments
+- **Rich-text tag reuse**: identical style configs now share one tag — rich mails previously spawned up to thousands of Tk tags; bound tags (links) stay unique
+- **Per-setting config read cache** (mtime-invalidated): the read-sync toggle no longer parses config.json on every batch
+- **AI requests retry once after 1s on 429/5xx**
+
+### Added
+
+- **i18n key completeness static test**: AST-scans all `t("...")` literals and asserts full EN-table coverage
+- Regression tests now total 186 cases
+
 ## [1.12.0] — 2026-10-17
 
 Experience-enhancement round: reading pane interaction, fetch-engine efficiency, UI details.
