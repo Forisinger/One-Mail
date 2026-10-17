@@ -112,6 +112,7 @@ pyinstaller build.spec --noconfirm
 - [x] 设置新增「帮助」页签（邮箱配置指引 / AI 配置 / 收发失败排查）；修复旧库启动崩溃 no such column: local_folder ✅ v1.11.5
 - [x] 三路并行审查修复轮（20+ 项）：flag_sync 写序、OAuth2 分片锁、右键菜单强销、英文界面错误高亮、数据库损坏自愈、config 类型校验、启动崩溃可见化等 ✅ v1.11.7
 - [x] 体验增强轮：HTML 链接可点击、邮件列表多选、搜索占位+Ctrl+F、blockquote/嵌套列表排版、首拉限量+6h 对账、SQLite WAL ✅ v1.12.0
+- [x] 第二轮审查回归修复 + UI 增强（选中行可读性/空状态/纯文本链接/写信快捷键/Ctrl+A/托盘角标） ✅ v1.13.0
 
 ## 📄 许可证
 

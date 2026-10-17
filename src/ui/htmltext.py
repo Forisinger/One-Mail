@@ -127,7 +127,8 @@ class _Renderer(HTMLParser):
             tags.append(self._tag(foreground=s.color))
         if s.quote:
             # 引用块：缩进 + 灰色，与正文一眼可分（v1.12.0）
-            tags.append(self._tag(lmargin1=18, lmargin2=18,
+            tags.append(self._tag(lmargin1=18, lmargin2=18, rmargin=18,
+                                  spacing1=2, spacing3=2,
                                   foreground=self.c.get("GRAY", "#888888")))
         return tuple(tags)
 
@@ -244,7 +245,8 @@ class _Renderer(HTMLParser):
             return
         name = f"img{self._tag_no}"
         self._tag_no += 1
-        self.w.tag_configure(name)
+        # 上下留呼吸感（v1.13.0）：图片回填后紧贴文字太挤
+        self.w.tag_configure(name, spacing1=4, spacing3=4)
         alt = (attrs.get("alt") or "").strip()
         self.w.insert("end", alt or "［图片］", (name, "imgph"))
         self.images.append((name, src))
@@ -273,6 +275,13 @@ def render_html(widget: tk.Text, html: str, base_font, colors: dict[str, str]) -
     if not html:
         return []
     try:
+        # 跨渲染清理（v1.13.0）：Text 的 tag 定义/tag_bind 不随 delete("1.0",
+        # "end") 消失，而 tag 名从 ht1 起每封邮件重新计数——上一封链接的
+        # 点击绑定会残留到本封普通样式标签上（点粗体字打开旧链接）。
+        # 渲染入口保证控件已清空，此处删除本模块命名空间的全部旧 tag。
+        for t in widget.tag_names():
+            if t.startswith(("ht", "img")):
+                widget.tag_delete(t)
         r = _Renderer(widget, base_font, colors)
         r.feed(html)
         r.close()

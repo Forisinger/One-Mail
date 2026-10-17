@@ -163,9 +163,8 @@ class FlagSync:
             return
 
         # 块级失败收集 + 组内内联重试：成功块不重发；重试不回队（保序）
-        # v1.11.7：组内**首个** chunk 连续失败 2 次视为连接层已死，
-        # 直接中止整组——否则网络中断 + "全部已读" 1000 封 =
-        # 20 chunk × 2 次 × (建连+登录+SELECT+STORE)，worker 被放大阻塞数分钟
+        # v1.13.0：**任何** chunk 连续失败 2 次即中止整组——原先只保护首个
+        # chunk，"全部已读"中途断网时 chunk 2..N 仍各做 2 次全新建连登录
         failed: list[str] = []
         err: Exception | None = None
         for i in range(0, len(uids), CHUNK_SIZE):
@@ -181,9 +180,8 @@ class FlagSync:
                 except Exception as e2:
                     err = e2
                     failed.extend(chunk)
-                    if i == 0:
-                        failed.extend(uids[i + CHUNK_SIZE:])
-                        break
+                    failed.extend(uids[i + CHUNK_SIZE:])
+                    break
         self._forget(account_id, folder, uids, seen)
         if failed:
             self._log(f"flag_sync: {getattr(account, 'email', account_id)} "

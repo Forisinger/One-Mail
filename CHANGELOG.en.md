@@ -4,6 +4,33 @@ All notable changes to **OneMail** are documented here. (中文版见 [CHANGELOG
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.13.0] — 2026-10-17
+
+Second multi-agent review round: regressions introduced by v1.11.7–v1.12.1 + a batch of UI enhancements.
+
+### Fixed (regressions)
+
+- **Reconcile regressed the watermark (H1)**: backfilled old UIDs could pull `fetched_max` far below the existing watermark, causing a full re-download of all unread mails next cycle; watermark now takes `max(max_uid, fetched_max)`
+- **Attachment defect check ran before decoding (H2)**: `InvalidBase64*` defects attach to `part.defects` only during `get_payload(decode=True)`, so the pre-decode check never saw them and corrupt base64 attachments passed through as mojibake. Check moved after decode, matched against exact defect class names
+- **Rich-text tag-name recycling across renders leaked link bindings (H3)**: clicking bold text in mail B could open mail A's URL. Renderer namespace tags (`ht*`/`img*`) are now deleted before each render
+- **flag_sync retry amplification only guarded the first chunk (H4)**: mid-group double failures still amplified; any double-failed chunk now aborts the group
+- **Right-click destroyed multi-selection (M3)**: selection only reset when the right-clicked row is outside it; delete is batch-aware with count feedback
+- **Config cache lacked explicit invalidation (M4)**: same-tick double writes could return identical mtime; save() now invalidates
+- **Reconcile capped at 500 mails per round (M2)**; 1.12.0 wording revised (read-state rollback for cached mails out of scope)
+- AI retry dead code removed; AI summary busy check ordered before status write; Esc restores search placeholder immediately
+
+### Added (UI)
+
+- **Selected-row readability**: clam tag colors used to override selection (dark-blue on blue for unread rows); dedicated selection style, unread weight falls back to regular
+- **Empty-state hints** for no-accounts / no-results
+- **Clickable links in plain-text bodies** (regex URL detection, hand cursor)
+- **Compose shortcuts**: Ctrl+B/I/U, Ctrl+Enter to send
+- **Ctrl+A select-all** in the mail list + selection count feedback
+- **Search focus highlight** on the border frame
+- **Tray badge drawing**: outline 2→4px, font size coupled to badge radius
+- Image placeholder spacing; blockquote right margin
+- 187 tests total
+
 ## [1.12.1] — 2026-10-17
 
 Polish round: parser tolerance, performance, test guardrails.
@@ -32,7 +59,7 @@ Experience-enhancement round: reading pane interaction, fetch-engine efficiency,
 - **Blockquote visual distinction**: left indent + grey foreground
 - **Nested lists indented by depth**
 - **First-pull limit**: newly added large mailboxes fetch only the latest 200 unread mails instead of the full history
-- **Low-frequency full reconciliation** (every 6h): covers watermark blind spots — old mails re-marked unread on the web, locally deleted mails, and history truncated by the first-pull limit get backfilled
+- **Low-frequency full reconciliation** (every 6h, capped at 500 mails per round): covers watermark blind spots — history truncated by the first-pull limit and locally deleted mails that are still unseen server-side get backfilled (v1.13.0 revision: read-state rollback for already-cached mails needs FLAGS comparison and is out of scope for now)
 - **SQLite WAL mode + busy_timeout**: background fetch writes no longer block UI full-text searches
 - **Composite unread index** `(account_id, is_read)` replaces the single-column index
 - Status bar feedback showing the count for mark-all-read and batch marks

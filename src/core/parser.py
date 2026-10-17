@@ -239,14 +239,15 @@ def parse_raw(raw: bytes) -> ParsedMail:
 def _has_fatal_defect(part) -> bool:
     """附件是否带**编码类**缺陷（内容不可信）。
 
-    结构类缺陷（边界未闭合、缺 StartBoundary 等）不影响已声明编码的
-    解码结果，不应因此丢弃附件。
+    按确切的缺陷类名精确匹配：结构类缺陷（边界未闭合等）与
+    MisplacedEnvelopeHeader 等头部结构缺陷不影响解码结果，
+    不应因此丢弃附件。
     """
-    for d in part.defects:
-        name = type(d).__name__
-        if any(k in name for k in ("Base64", "QP", "Header", "Undecodable")):
-            return True
-    return False
+    fatal = {"InvalidBase64CharactersDefect", "InvalidBase64PaddingDefect",
+             "InvalidBase64LengthDefect",
+             "InvalidQuotedPrintableDefect",
+             "UndecodableBytesDefect", "UndecodableBytesInHeadersDefect"}
+    return any(type(d).__name__ in fatal for d in part.defects)
 
 
 def extract_attachments(raw: bytes) -> list[tuple[str, bytes]]:
@@ -265,18 +266,16 @@ def extract_attachments(raw: bytes) -> list[tuple[str, bytes]]:
                 if not (disp and "attachment" in disp.lower()):
                     continue
                 filename = "(未命名附件)"
-            if _has_fatal_defect(part):
-                # 只拒绝编码类缺陷（损坏 base64/QP 等，内容已不可信）：
-                # CloseBoundaryNotFound 等结构缺陷在真实营销邮件中极常见
-                # 且附件完好，原先一票否决会整体丢弃附件（v1.12.1）
-                continue
             if part.get_content_maintype() == "message":
                 # message/rfc822（.eml）附件：get_payload(decode=True) 返回
                 # None，用原始字节作为内容保存
                 payload = part.as_bytes()
             else:
                 payload = part.get_payload(decode=True)
-            if payload is None:
+            # 缺陷检查必须在 get_payload **之后**（v1.13.0 修正 v1.12.1 的
+            # 错位）：InvalidBase64* 等编码缺陷是解码调用时才挂上 part.defects
+            # 的，解码前检查永远看不到，损坏附件会以部分解码的乱码放行
+            if payload is None or _has_fatal_defect(part):
                 continue
             out.append((_decode_header_value(filename), payload))
         return out

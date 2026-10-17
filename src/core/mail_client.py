@@ -34,6 +34,7 @@ _EXISTS_RE = re.compile(rb"\*\s+(\d+)\s+EXISTS", re.IGNORECASE)
 # 几千封历史未读；剩余旧未读由低频对账逐步补齐
 FIRST_PULL_LIMIT = 200
 RECONCILE_INTERVAL = 6 * 3600   # 秒
+RECONCILE_BATCH_LIMIT = 500     # 每轮对账最多补齐的旧邮件数（"逐步"的含义）
 
 
 def imap_login(conn, account, password: str) -> None:
@@ -373,10 +374,12 @@ class MailClient:
             database.set_folder_state(self.account.id, folder,
                                       uidvalidity, max_uid)
 
-        # v1.12.0：首拉限量 + 低频全量对账。
-        # 水位机制只看得见"比已知最大 UID 新"的变化——网页端把旧邮件标
-        # 未读、本地删除后再收、以及首拉被限量的历史未读，都因 UID ≤ 水位
-        # 被永久跳过。每 RECONCILE_INTERVAL 做一次 DB 存在性对账兜底。
+        # v1.12.0：首拉限量 + 低频对账。
+        # 水位机制只看得见"比已知最大 UID 新"的变化——首拉被限量的历史
+        # 未读、本地删除的邮件、服务器端仍是 UNSEEN 的旧邮件，都因
+        # UID ≤ 水位被永久跳过。每 RECONCILE_INTERVAL 对本地缺失的未读
+        # 做一次补齐（注意：本地已缓存且已读、而网页端重新标未读的邮件
+        # 不在此列——那需要 FLAGS 对比，见后续版本）。
         reconcile = (time.time() - self._last_reconcile) >= RECONCILE_INTERVAL
         if reconcile:
             self._last_reconcile = time.time()
@@ -386,11 +389,19 @@ class MailClient:
 
         known: set[str] | None = None
         if reconcile:
+            # 本地已缓存的跳过；对账每轮限量——"逐步补齐"而不是一次性
+            # 把几千封旧未读灌进通知链（v1.13.0）
+            todo = []
             known = set()
             for i in range(0, len(uids), 500):
                 chunk = [u.decode() for u in uids[i:i + 500]]
                 known.update(
                     database.existing_uids(self.account.id, folder, chunk))
+            todo = [u for u in uids if u.decode() not in known]
+            uids = todo[:RECONCILE_BATCH_LIMIT]
+            if len(todo) > RECONCILE_BATCH_LIMIT:
+                self._status(f"对账进行中：本轮补齐 {len(uids)} 封，"
+                             f"剩余 {len(todo) - len(uids)} 封下轮继续")
 
         batch = []
         fetched_max = 0
@@ -398,10 +409,7 @@ class MailClient:
             if self._stop.is_set():
                 break
             uid_num = int(uid)
-            if reconcile:
-                if uid.decode() in known:
-                    continue   # 本地已有（含首拉限量外的旧未读）不再下载
-            elif uid_num <= max_uid:
+            if not reconcile and uid_num <= max_uid:
                 continue            # 本地已有该 UID 的缓存，跳过原文下载
             typ, msgdata = conn.uid("fetch", uid, "(BODY.PEEK[])")
             if (typ != "OK" or not msgdata or not msgdata[0]
@@ -434,11 +442,14 @@ class MailClient:
         if not batch:
             return
         # 同步入库（DB 有全局锁，线程安全），确认落库后才推进水位——
-        # 若先推水位后入库，退出/崩溃窗口内的事件会因 UID ≤ 水位被永久跳过
+        # 若先推水位后入库，退出/崩溃窗口内的事件会因 UID ≤ 水位被永久跳过。
+        # 水位取单调上界（v1.13.0）：reconcile 会补齐首拉限量外的旧 UID，
+        # fetched_max 可能远小于现有水位，直接覆盖会让下一轮把所有
+        # UID>新水位的未读邮件重新全文下载一遍；循环中途 break 同理。
         new = database.insert_mails(self.account.id, batch, folder=folder)
         if fetched_max and uidvalidity:
             database.set_folder_state(self.account.id, folder,
-                                      uidvalidity, fetched_max)
+                                      uidvalidity, max(max_uid, fetched_max))
         if new:
             self._on_new_mail(self.account, new)   # 只通知真正新入库的
 

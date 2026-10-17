@@ -85,6 +85,30 @@ class FlagSyncOrderTests(unittest.TestCase):
         # 首个 chunk 重试失败 → 整组中止，不再发起第二个 chunk
         self.assertEqual(len(h.calls), 2)
 
+    def test_mid_group_failure_aborts_too(self):
+        """chunk1 成功、chunk2 双失败：整组中止（v1.13.0，防中段放大）。"""
+        import threading
+
+        calls = []
+        state = {"n": 0}
+
+        def connector(account, password, folder, uids, seen):
+            state["n"] += 1
+            if state["n"] in (3, 4):   # chunk2 的两次尝试失败
+                raise ConnectionError("断网")
+            calls.append(list(uids))
+
+        fs = FlagSync(lambda aid: (_Harness().accounts["a1"], "pwd"),
+                      connector=connector, enabled=lambda: True,
+                      log=lambda m: None, start_thread=False)
+        # 150 UIDs = 3 chunks：chunk1/2 成功，chunk3 双失败 → 整组中止
+        jobs = [("a1", "INBOX", str(i), True) for i in range(1, 151)]
+        fs._process_batch([(a, f, u, s, 0) for a, f, u, s in jobs])
+        fs.stop()
+        # chunk1/2 成功 + chunk3 两次失败 → 共 4 次调用，无 chunk4
+        self.assertEqual(state["n"], 4)
+        self.assertEqual(len(calls), 2)
+
 
 class FolderWireTests(unittest.TestCase):
     def test_quotes_escaped(self):

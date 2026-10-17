@@ -126,6 +126,14 @@ class ComposeWindow:
                                 undo=True)
         self.txt_body.pack(fill="both", expand=True)
         self.txt_body.insert("1.0", body)
+        # 键盘快捷键（v1.13.0）：Ctrl+B/I/U 切样式，Ctrl+Enter 发送——
+        # 写信是高频路径，纯鼠标操作太慢；Text 默认绑定不占用这几个键
+        self.txt_body.bind("<Control-b>", lambda e: self._hotkey_font("bold"))
+        self.txt_body.bind("<Control-i>",
+                           lambda e: self._hotkey_font("italic"))
+        self.txt_body.bind("<Control-u>",
+                           lambda e: self._hotkey_font("underline"))
+        self.win.bind("<Control-Return>", self._hotkey_send)
         # 预建全部字体组合标签（避免运行期 tag 优先级竞争）
         for b in (0, 1):
             for i in (0, 1):
@@ -265,6 +273,17 @@ class ComposeWindow:
         if ranges:
             return str(ranges[0]), str(ranges[1])
         return None
+
+    def _hotkey_font(self, attr: str):
+        """Ctrl+B/I/U：有选区走正常切换，无选区仅提示（无自动配对逻辑）。"""
+        if self._sel_range():
+            self._toggle_font(attr)
+        return "break"
+
+    def _hotkey_send(self, _e=None):
+        """Ctrl+Enter 发送（v1.13.0）。"""
+        self.send()
+        return "break"
 
     def _toggle_font(self, attr: str):
         """选区加/去粗体、斜体、下划线（按字符逐段处理组合标签）。"""

@@ -90,6 +90,7 @@ def get_setting(key: str, default=None):
 
 def save(data: dict) -> None:
     """原子写：先写临时文件再 os.replace，进程中断也不会留下半个 JSON。"""
+    global _cached_data, _cached_mtime
     tmp = _CONFIG + ".tmp"
     with _LOCK:
         with open(tmp, "w", encoding="utf-8") as f:
@@ -99,3 +100,7 @@ def save(data: dict) -> None:
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, _CONFIG)
+        # 显式失效缓存（v1.13.0）：NTFS mtime 更新粒度受系统时钟计时器
+        # 影响，同 tick 内双写可能返回相同 mtime，get_setting 会读到陈旧值
+        _cached_data = None
+        _cached_mtime = -1.0

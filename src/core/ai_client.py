@@ -50,7 +50,6 @@ def chat(base_url: str, api_key: str, model: str, messages: list[dict],
     429/5xx 自动退避 1 秒重试一次（限流/瞬断常见，重试成本极低）。
     """
     req = build_request(base_url, api_key, model, messages, timeout)
-    last_http_err: urllib.error.HTTPError | None = None
     for attempt in (1, 2):
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -67,9 +66,9 @@ def chat(base_url: str, api_key: str, model: str, messages: list[dict],
             if e.code in (429, 500, 502, 503, 504) and attempt == 1:
                 import time
                 time.sleep(1.0)
-                last_http_err = e
                 continue
-            raise RuntimeError(f"HTTP {e.code} {detail}") from e
+            suffix = "（重试后仍失败）" if attempt == 2 else ""
+            raise RuntimeError(f"HTTP {e.code} {suffix}{detail}") from e
         except urllib.error.URLError as e:
             raise RuntimeError(f"无法连接 AI 服务: {e.reason}") from e
         except json.JSONDecodeError as e:
@@ -77,9 +76,6 @@ def chat(base_url: str, api_key: str, model: str, messages: list[dict],
                 "AI 服务返回了非 JSON 内容（请检查 API 地址是否正确）") from e
         except OSError as e:
             raise RuntimeError(f"AI 请求网络错误: {e}") from e
-    else:
-        e = last_http_err
-        raise RuntimeError(f"HTTP {e.code}（重试后仍失败）") from e
     try:
         return (data["choices"][0]["message"]["content"] or "").strip()
     except (KeyError, IndexError, TypeError) as e:

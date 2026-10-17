@@ -232,6 +232,14 @@ _EN = {
     "已标记 {n} 封为未读": "Marked {n} mail(s) as unread",
     "打开附件失败: {err}": "Failed to open attachment: {err}",
     "保存附件失败: {err}": "Failed to save attachment: {err}",
+    # ---- v1.13.0 ----
+    "已选中 {n} 封": "{n} selected",
+    "还没有账户\n点击左下角「⚙ 账户管理…」添加":
+        "No accounts yet\nClick ⚙ Account Manager (bottom-left) to add one",
+    "没有符合条件的邮件\n（试试清空搜索或切换过滤器）":
+        "No mails match\n(Try clearing the search or changing the filter)",
+    "已从本地缓存删除 {n} 封邮件（服务器不受影响）":
+        "Deleted {n} mail(s) from local cache (server untouched)",
     "同步已读到服务器": "Sync Read State to Server",
     "退出": "Quit",
     "一邮通 OneMail｜未读 {n}": "OneMail | Unread {n}",

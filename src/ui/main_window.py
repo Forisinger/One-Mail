@@ -322,12 +322,13 @@ class MainWindow:
                          font=FONT_UI, width=22,
                          insertbackground=self.C["TEXT"])
         entry.pack(side="left", padx=(0, 8), pady=5)
-        entry.bind("<Escape>", lambda e: self._search_var.set(""))  # Esc 清空搜索
+        entry.bind("<Escape>", self._search_escape)  # Esc 清空搜索并恢复占位
         # 搜索防抖：停顿 300ms 后才查库，避免每敲一个字符全表扫描
         self._search_job = None
         self._search_var.trace_add("write", self._on_search_changed)
         # 占位提示 + Ctrl+F（v1.12.0）：空态显示灰字，聚焦即消失
         self._search_entry = entry
+        self._search_wrap = search_wrap
         self._search_ph = i18n.t("搜索邮件…")
         self._search_var.set(self._search_ph)
         entry.configure(fg=self.C["GRAY"])
@@ -339,12 +340,22 @@ class MainWindow:
         self._search_entry.focus_set()
         return "break"   # 拦截 Text 默认的 forward-char，避免边打字边跳焦点
 
+    def _search_escape(self, _e=None):
+        """Esc：清空搜索并恢复占位显示（含灰字，不必等焦点离开）。"""
+        self._search_var.set("")
+        self._search_var.set(self._search_ph)
+        self._search_entry.configure(fg=self.C["GRAY"])
+
     def _search_focus_in(self, _e=None):
+        # 聚焦高亮（v1.13.0）：bd=0 的 Entry 无系统焦点框，外框亮起是
+        # Tab 键用户唯一的焦点指示
+        self._search_wrap.configure(highlightbackground=self.C["ACCENT"])
         if self._search_var.get() == self._search_ph:
             self._search_var.set("")
             self._search_entry.configure(fg=self.C["TEXT"])
 
     def _search_focus_out(self, _e=None):
+        self._search_wrap.configure(highlightbackground=self.C["BORDER"])
         if not self._search_var.get():
             self._search_var.set(self._search_ph)
             self._search_entry.configure(fg=self.C["GRAY"])
@@ -428,13 +439,27 @@ class MainWindow:
         self.tree.bind("<Return>", self._on_mail_open)   # 键盘用户也能打开邮件
         self.tree.bind("<Button-3>", self._mail_list_menu)
         self.tree.bind("<Delete>", lambda e: self.delete_selected_mail())
+        # Ctrl+A 全选（多选批量操作配套，v1.13.0）
+        self.tree.bind("<Control-a>", lambda e: (
+            self.tree.selection_set(self.tree.get_children()), "break")[1])
         # 列宽自适应：容器宽度变化时按比例重算，保证四列都在（v1.11.1）
         self.tree.bind("<Configure>", self._on_tree_configure)
         # 行样式：未读加粗着色 + 隔行底色
         self.tree.tag_configure("unread", font=FONT_UI_B,
                                 foreground=self.C["ACCENT_DARK"])
         self.tree.tag_configure("odd", background=self.C["ROW_ALT"])
+        # 选中态（v1.13.0）：clam 下 tag 颜色优先于选中样式，未读行/斑马行
+        # 被选中时会"深蓝字压蓝底"。tag 优先级按配置顺序，sel 最后配置即
+        # 最高优先级；选中未读行回落普通字重，区分"未读"与"已选中"
+        self.tree.tag_configure("sel", background=self.C["ACCENT"],
+                                foreground=self.C["SEL_FG"], font=FONT_UI)
+        self.tree.bind("<<TreeviewSelect>>", self._on_tree_select)
         right.add(frame_top, weight=3)
+
+        # 空状态提示（v1.13.0）：无账户 / 筛选无结果时不再是全白
+        self._empty_hint = tk.Label(frame_top, text="", bg=self.C["CARD"],
+                                    fg=self.C["GRAY"], font=FONT_UI,
+                                    justify="center")
 
         # 阅读区（卡片）
         body_card = ttk.Frame(right, style="Card.TFrame")
@@ -742,6 +767,16 @@ class MainWindow:
         row.bind("<Button-3>", lambda e, k=key: self._folder_menu(e, k or None))
         self._folder_rows.append(row)
 
+    def _on_tree_select(self, _e=None):
+        """维护 sel tag（覆盖未读/斑马色）+ 多选计数回显（v1.13.0）。"""
+        sel = self.tree.selection()
+        for item in self.tree.tag_has("sel"):
+            self.tree.tag_remove("sel", item)
+        for item in sel:
+            self.tree.tag_add("sel", item)
+        if len(sel) > 1:
+            self.var_status.set(i18n.t("已选中 {n} 封").format(n=len(sel)))
+
     def _select_folder(self, key: str):
         # 再点一次同一文件夹 = 取消筛选（回到全部）
         self._filter_local = None if self._filter_local == key else key
@@ -894,6 +929,17 @@ class MainWindow:
             i18n.t("共 {n} 封，显示 {m} 封").format(n=total, m=filtered)
             if (keyword or mode != i18n.t("全部")) else
             i18n.t("共 {n} 封").format(n=total))
+        # 空状态提示（v1.13.0）
+        if not self.manager.all():
+            self._empty_hint.configure(
+                text=i18n.t("还没有账户\n点击左下角「⚙ 账户管理…」添加"))
+            self._empty_hint.place(relx=0.5, rely=0.4, anchor="center")
+        elif not rows:
+            self._empty_hint.configure(
+                text=i18n.t("没有符合条件的邮件\n（试试清空搜索或切换过滤器）"))
+            self._empty_hint.place(relx=0.5, rely=0.4, anchor="center")
+        else:
+            self._empty_hint.place_forget()
 
     def full_refresh(self):
         self.refresh_accounts()
@@ -948,14 +994,53 @@ class MainWindow:
             if not self.txt_body.get("renderstart", "end-1c").strip() \
                     and (mail["body_text"] or "").strip():
                 self.txt_body.configure(state="normal")
-                self.txt_body.insert("end", mail["body_text"], "body")
+                self._insert_body_text(mail["body_text"])
                 self.txt_body.configure(state="disabled")
             if images:
                 self._load_mail_images(mail["id"], images)
         else:
             body = mail["body_text"] or i18n.t("（无正文/解析失败）")
-            self.txt_body.insert("end", body, "body")
+            self._insert_body_text(body)
             self.txt_body.configure(state="disabled")
+
+    def _insert_body_text(self, text: str):
+        """插入纯文本正文，URL 段挂可点击链接标签（v1.13.0）。
+
+        国内邮箱纯文本邮件占比不低，此前链接只能复制去浏览器。
+        """
+        # 旧邮件的链接 tag 定义/bind 不随 delete 消失，先清理
+        for t in self.txt_body.tag_names():
+            if t.startswith("urltag"):
+                self.txt_body.tag_delete(t)
+        url_re = re.compile(r"https?://[^\s<>\"')\]]+")
+        pos = 0
+        for m in url_re.finditer(text):
+            url = m.group(0).rstrip(".,;:，。；、）)")
+            self._link_seq = getattr(self, "_link_seq", 0) + 1
+            name = f"urltag{self._link_seq}"
+            self.txt_body.tag_configure(name, foreground=self.C["ACCENT"],
+                                        underline=1)
+            self.txt_body.tag_bind(
+                name, "<Button-1>",
+                lambda _e, u=url: self._open_url(u))
+            self.txt_body.tag_bind(name, "<Enter>",
+                                   lambda _e: self.txt_body.configure(
+                                       cursor="hand2"))
+            self.txt_body.tag_bind(name, "<Leave>",
+                                   lambda _e: self.txt_body.configure(
+                                       cursor=""))
+            self.txt_body.insert("end", text[pos:m.start()], "body")
+            self.txt_body.insert("end", url, (name, "body"))
+            pos = m.start() + len(url)
+        self.txt_body.insert("end", text[pos:], "body")
+
+    @staticmethod
+    def _open_url(url: str):
+        try:
+            import webbrowser
+            webbrowser.open(url)
+        except Exception:
+            pass
 
     def _load_mail_images(self, mail_id: int, images):
         """后台线程加载邮件图片（v1.10.0）：CID 内嵌/远程 http/data:URI。
@@ -1076,7 +1161,10 @@ class MainWindow:
         row = self.tree.identify_row(event.y)
         if not row:
             return
-        self.tree.selection_set(row)
+        # 右键行不在当前选区内才重设选区（v1.13.0）：原先无条件
+        # selection_set 会把 Shift/Ctrl 多选压缩成 1 封，右键批量操作失效
+        if row not in self.tree.selection():
+            self.tree.selection_set(row)
         mail = db.get_mail(int(row))
         if mail is None:
             return
@@ -1122,15 +1210,16 @@ class MainWindow:
         self._popup_menu(menu, event)
 
     def delete_selected_mail(self):
-        """删除选中邮件的本地缓存（不动服务器上的邮件）。"""
+        """删除选中邮件的本地缓存（不动服务器上的邮件）。支持多选批量。"""
         sel = self.tree.selection()
         if not sel:
             return
-        mail_id = int(sel[0])
         # 记住位置，删除后选中跟随到相邻行（键盘连续清理不断流，v1.11.4）
         idx = self.tree.index(sel[0])
-        db.delete_mail(mail_id)
-        if self._current_mail and self._current_mail["id"] == mail_id:
+        ids = {int(i) for i in sel}
+        for mail_id in ids:
+            db.delete_mail(mail_id)
+        if self._current_mail and self._current_mail["id"] in ids:
             self._current_mail = None
             self.txt_body.configure(state="normal")
             self.txt_body.delete("1.0", "end")
@@ -1143,7 +1232,10 @@ class MainWindow:
             self.tree.focus(new_sel)
             self.tree.see(new_sel)
         self.refresh_accounts()
-        self.var_status.set(i18n.t("已从本地缓存删除该邮件（服务器不受影响）"))
+        n = len(ids)
+        self.var_status.set(
+            i18n.t("已从本地缓存删除该邮件（服务器不受影响）") if n == 1
+            else i18n.t("已从本地缓存删除 {n} 封邮件（服务器不受影响）").format(n=n))
 
     def _account_menu(self, account_id: str | None, event):
         """账户面板右键：复制邮箱地址/账户名 + 进入账户管理（v1.11.0）。"""
@@ -1346,11 +1438,12 @@ class MainWindow:
         sender = mail["from_name"] or mail["from_addr"] or ""
         sender = f"{sender} ({acc_name})" if acc_name else sender
         body = mail["body_text"] or ""
-        self.var_status.set(i18n.t("正在请求 AI…"))
-        # 重入保护（v1.12.0）：请求期间再点右键 AI 总结会叠加多个结果窗
+        # 重入保护（v1.12.0）：请求期间再点右键 AI 总结会叠加多个结果窗。
+        # 先检查再改状态（v1.13.0）：busy 时不能覆盖正在展示的状态文本
         if getattr(self, "_ai_busy", False):
             return
         self._ai_busy = True
+        self.var_status.set(i18n.t("正在请求 AI…"))
 
         def work():
             try:

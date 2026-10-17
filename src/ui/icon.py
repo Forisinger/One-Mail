@@ -10,17 +10,21 @@ from PIL import Image, ImageDraw, ImageFont
 _SIZE = 64
 
 
-def _badge_font():
-    """角标数字字体：TrueType 更大更清晰，失败回退 Pillow 默认点阵。"""
+def _badge_font(size: int):
+    """角标数字字体：TrueType 更大更清晰，失败回退 Pillow 默认点阵。
+
+    字号随角标半径联动（v1.13.0）：固定 24px 在 r=13 时偏挤、r=21 时
+    "99+" 接近溢出。
+    """
     for name in ("segoeuib.ttf", "arialbd.ttf", "arial.ttf"):
         try:
-            return ImageFont.truetype(name, 24)
+            return ImageFont.truetype(name, size)
         except OSError:
             continue
     return ImageFont.load_default()
 
 
-_FONT_CACHE = None   # 模块级缓存，避免每次重绘都扫字体文件
+_FONT_CACHE: dict[int, object] = {}   # 模块级缓存，避免每次重绘都扫字体文件
 
 
 def base_icon() -> Image.Image:
@@ -44,16 +48,17 @@ def with_badge(count: int) -> Image.Image:
         return img
     d = ImageDraw.Draw(img)
     label = "99+" if count > 99 else str(count)
-    # 角标圆的半径随位数微调
+    # 角标圆的半径随位数微调；字号随半径联动
     r = 13 if len(label) == 1 else (17 if len(label) == 2 else 21)
     cx, cy = _SIZE - r - 2, r + 2
+    # 白描边加粗（v1.13.0）：width=2 缩到 20px 任务栏尺寸后不足 1px，
+    # 深色任务栏上红圈发虚
     d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(230, 50, 50, 255),
-              outline=(255, 255, 255, 255), width=2)
-    # 文字居中（使用缓存的字体实例）
-    global _FONT_CACHE
-    if _FONT_CACHE is None:
-        _FONT_CACHE = _badge_font()
-    font = _FONT_CACHE
+              outline=(255, 255, 255, 255), width=4)
+    font = _FONT_CACHE.get(r)
+    if font is None:
+        font = _badge_font(int(r * 1.15))
+        _FONT_CACHE[r] = font
     bbox = d.textbbox((0, 0), label, font=font)
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
     d.text((cx - tw / 2 - bbox[0], cy - th / 2 - bbox[1]), label,
