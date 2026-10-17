@@ -338,7 +338,9 @@ class MainWindow:
 
     def _search_shortcut(self, _e=None):
         self._search_entry.focus_set()
-        return "break"   # 拦截 Text 默认的 forward-char，避免边打字边跳焦点
+        # 注：Text 类绑定先于 toplevel 绑定执行，焦点在阅读区时 Ctrl+F
+        # 仍会先移动一次光标——无法从 root 级完全拦截（v1.13.1 注释勘误）
+        return "break"
 
     def _search_escape(self, _e=None):
         """Esc：清空搜索并恢复占位显示（含灰字，不必等焦点离开）。"""
@@ -1331,7 +1333,7 @@ class MainWindow:
                 os.startfile(path)
             except OSError as e:
                 # 目标文件被占用/无关联程序：exe 无控制台，异常必须可见
-                self.var_status.set(i18n.t("打开附件失败: {err}").format(err=e))
+                self.var_status.set(i18n.t("打开附件失败：{err}").format(err=e))
             return
 
         def done(atts):
@@ -1345,7 +1347,7 @@ class MainWindow:
                     f.write(data)
                 os.startfile(path)
             except Exception as e:
-                self.var_status.set(i18n.t("打开附件失败: {err}").format(err=e))
+                self.var_status.set(i18n.t("打开附件失败：{err}").format(err=e))
                 return
             self.var_status.set(i18n.t("已打开：{name}").format(name=name))
 
@@ -1372,7 +1374,7 @@ class MainWindow:
                 with open(dest, "wb") as f:
                     f.write(data)
             except Exception as e:
-                self.var_status.set(i18n.t("保存附件失败: {err}").format(err=e))
+                self.var_status.set(i18n.t("保存附件失败：{err}").format(err=e))
                 return
             self.var_status.set(i18n.t("已保存：{path}").format(path=dest))
 
@@ -1404,7 +1406,7 @@ class MainWindow:
                     with open(path, "wb") as f:
                         f.write(data)
                 except Exception as e:
-                    self.var_status.set(i18n.t("保存附件失败: {err}").format(err=e))
+                    self.var_status.set(i18n.t("保存附件失败：{err}").format(err=e))
                     return
                 saved += 1
             self.var_status.set(i18n.t("已保存 {n} 个附件到 {dest}")

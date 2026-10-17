@@ -230,8 +230,8 @@ _EN = {
     "搜索邮件…": "Search mails…",
     "已标记 {n} 封为已读": "Marked {n} mail(s) as read",
     "已标记 {n} 封为未读": "Marked {n} mail(s) as unread",
-    "打开附件失败: {err}": "Failed to open attachment: {err}",
-    "保存附件失败: {err}": "Failed to save attachment: {err}",
+    "打开附件失败：{err}": "Failed to open attachment: {err}",
+    "保存附件失败：{err}": "Failed to save attachment: {err}",
     # ---- v1.13.0 ----
     "已选中 {n} 封": "{n} selected",
     "还没有账户\n点击左下角「⚙ 账户管理…」添加":
