@@ -5,8 +5,11 @@
 - 收信通道永远 readonly（安全红线不变）；本模块用独立的**短连接**（连上→STORE→logout）
   改标志，与收信长连接完全隔离，互不污染 socket。
 - UI 线程只投递任务（submit），网络操作全部在后台线程，永不阻塞界面。
-- 任务按 (account, folder, seen) 分组、UID 数值排序、50 个一批成批 STORE——
-  "全部已读"也是每 (账户, 文件夹) 一次连接，绝不每封一连。
+- 任务按入队顺序处理，仅把**连续**同 (account, folder, seen) 的任务合并成组、
+  UID 数值排序、50 个一批成批 STORE——"全部已读"也是每 (账户, 文件夹) 一次连接，
+  绝不每封一连。
+  （v1.11.6 修复：原先按方向分组会打乱先后——R→U→R 分组后 U 组最后执行，
+  服务器最终状态与用户最后操作相反；连续分组保证任意前缀的操作顺序与入队一致。）
 - 失败在组内**内联重试 1 次**后丢弃并记日志：不把失败任务重新入队——
   重试回队会排在用户新操作（如"标已读后立刻标未读"）后面，导致服务器端
   写序与用户最后意图相反且无自愈；内联重试不跨越任务边界，天然保序。
@@ -102,12 +105,16 @@ class FlagSync:
                             (account_id, folder, str(uid), bool(seen)))
 
     def _process_batch(self, jobs: list[tuple]) -> None:
-        """按 (account, folder, seen) 分组逐组处理。可注入 connector 直接单测。"""
-        groups: dict[tuple[str, str, bool], list[tuple[str, int]]] = {}
+        """按入队顺序处理，连续同 (account, folder, seen) 的任务合并成组。
+        可注入 connector 直接单测。"""
+        runs: list[tuple[tuple[str, str, bool], list[tuple[str, int]]]] = []
         for account_id, folder, uid, seen, attempts in jobs:
-            groups.setdefault((account_id, folder, bool(seen)), []).append(
-                (str(uid), attempts))
-        for (account_id, folder, seen), uid_list in groups.items():
+            key = (account_id, folder, bool(seen))
+            if runs and runs[-1][0] == key:
+                runs[-1][1].append((str(uid), attempts))
+            else:
+                runs.append((key, [(str(uid), attempts)]))
+        for (account_id, folder, seen), uid_list in runs:
             try:
                 self._process_group(account_id, folder, seen, uid_list)
             except Exception as e:
@@ -156,6 +163,9 @@ class FlagSync:
             return
 
         # 块级失败收集 + 组内内联重试：成功块不重发；重试不回队（保序）
+        # v1.11.6：组内**首个** chunk 连续失败 2 次视为连接层已死，
+        # 直接中止整组——否则网络中断 + "全部已读" 1000 封 =
+        # 20 chunk × 2 次 × (建连+登录+SELECT+STORE)，worker 被放大阻塞数分钟
         failed: list[str] = []
         err: Exception | None = None
         for i in range(0, len(uids), CHUNK_SIZE):
@@ -171,6 +181,9 @@ class FlagSync:
                 except Exception as e2:
                     err = e2
                     failed.extend(chunk)
+                    if i == 0:
+                        failed.extend(uids[i + CHUNK_SIZE:])
+                        break
         self._forget(account_id, folder, uids, seen)
         if failed:
             self._log(f"flag_sync: {getattr(account, 'email', account_id)} "

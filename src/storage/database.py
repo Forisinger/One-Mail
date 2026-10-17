@@ -147,6 +147,33 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
 
 
 def init() -> None:
+    try:
+        _init_db()
+    except sqlite3.DatabaseError as e:
+        # 数据库损坏自愈（v1.11.6）：断电/杀软干扰可致 onemail.db 损坏，
+        # 原先每次启动都抛 DatabaseError，应用永久无法启动只能手删文件。
+        # 现在改名留证后重建空库（邮件历史丢失但应用可用）。
+        import time
+        backup = f"{_DB}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}"
+        try:
+            os.replace(_DB, backup)
+        except OSError:
+            try:
+                os.remove(_DB)
+            except OSError:
+                raise e   # 无法腾出路径：只能继续抛
+        # 同名 -wal/-shm 残留一并清掉，防止新库读到旧日志
+        for suffix in ("-wal", "-shm"):
+            p = _DB + suffix
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+        _init_db()
+
+
+def _init_db() -> None:
     with _LOCK, _conn() as conn:
         _migrate(conn)
         _ensure_columns(conn)   # 旧库先补列：_SCHEMA 建索引依赖 local_folder
@@ -305,8 +332,12 @@ def mark_all_read_synced(account_id: str | None = None) -> list[sqlite3.Row]:
     先 SELECT 未读 (account_id, folder, uid) 再 UPDATE 置已读——若无事务包裹，
     间隙中入库的新邮件会被置已读却不在投递集合里，造成"本地已读、服务器
     永久未读"且水位机制不会自愈。rows 供 flag_sync 投递。
+    （v1.11.6：显式 BEGIN IMMEDIATE——sqlite3 legacy 模式下 SELECT 不会
+    开启事务，读-写间隙真实存在，docstring 声称的不变量原先只是靠进程内
+    全局锁间接成立。）
     """
     with _LOCK, _conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")   # 读-写置于同一写事务（见 docstring）
         if account_id:
             rows = conn.execute(
                 "SELECT account_id, folder, uid FROM mails "

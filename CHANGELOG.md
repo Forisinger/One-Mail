@@ -4,6 +4,47 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/)。
 
+## [1.11.6] — 2026-10-17
+
+三路并行代码审查修复轮：core 协议层 / UI 层 / 存储与入口，共 20 余项。
+
+### Fixed · 修复
+
+- **flag_sync 分组打乱写序（P1）**：按 (账户, 文件夹, 方向) 分组会把 R→U→R 交错序列的未读组排到最后执行，服务器最终状态与用户最后操作相反。改为按入队顺序处理、仅合并**连续**同方向任务
+- **flag_sync 重试放大（P2）**：组内首个 chunk 连续失败 2 次即中止整组——原先网络中断 + "全部已读" 1000 封会做 20×2 次全新建连登录，worker 被阻塞数分钟
+- **save_to_sent 缺 IMAP ID 命令（P1）**：网易 163/126 未上报 ID 时以 "Unsafe Login" 拒绝 LIST/APPEND，"已发送"同步永远静默失败；现已补报
+- **已发送副本残留 Bcc 头（P3）**：`send_message` 剥除的是内部副本，APPEND 的原消息仍带 Bcc——密送名单被永久留在服务器上；现于 APPEND 前删除
+- **OAuth2 刷新全局锁（P1）**：改为按账户 email 分片锁——原先全进程单锁且持锁做网络 IO，一个账户刷新慢可冻结其他账户收信与 UI 发信 30 秒
+- **右键菜单 500ms 强销（P1）**：tk_popup 在 Windows 上立即返回，浏览附件/移动到文件夹子菜单超过半秒菜单即被销毁、点击落空；改为 Unpost 事件后销毁
+- **英文界面异常账户失去红色高亮（P1）**：错误判定原先作用于翻译后的文本，中文关键词在英文模式下全部落空；现于翻译前判定
+- **写邮件颜色/清除格式只处理选区首字符（P2）**：起点无色中部带色的选区清除不干净，残留标签与新色叠加；现遍历全部样式标签
+- **AI 写信无重入保护（P2）**：连点"生成"起双线程，迟到结果抛 TclError 静默丢失；生成中禁用按钮 + 弹窗销毁后丢弃迟到回调
+- **附件打开/保存回调无异常保护（P2）**：目标文件被占用或无关联程序时点击毫无反应（exe 无控制台）；现捕获并显示友好错误
+- **带透明通道的调色板图渲染成实色杂色（P2）**：P 模式 PNG/GIF（常见于签名 logo）转 RGB 丢失透明度；现检测 transparency 转 RGBA
+- **config.json 合法 JSON 但类型错误时启动必崩（P1）**：`[1,2]`/`"x"`/`null` 会让 load() 抛 AttributeError，exe 双击无反应且不触发备份；现类型校验后走损坏备份流程
+- **config 损坏备份覆盖上一次留证（P2）**：目标已存在时改用带时间戳文件名
+- **数据库损坏无恢复路径（P1）**：onemail.db 损坏后应用永久无法启动只能手删；现改名留证（`onemail.db.corrupt-时间戳`）后自动重建
+- **mark_all_read_synced 的"同一事务"保证未生效（P1）**：sqlite3 legacy 模式下 SELECT 不开启事务，读-写间隙真实存在；现显式 `BEGIN IMMEDIATE`
+- **single_instance 未声明 HANDLE 原型（P2）**：默认 restype=c_int，高位为 1 的句柄被符号扩展后传回即失效，唤醒功能可能静默永久失效；现全套声明 argtypes/restype
+- **启动期异常不可见（P2）**：main() 包顶层兜底，traceback 落 onemail.log 并弹窗提示——原先 console=False 下进程直接消失，"双击没反应"无从排查
+- **日志无限增长（P2）**：onemail.log 超 1MB 轮转为 .log.1
+- **通知失败完全静默（P2）**：pystray notify 异常现落日志
+- **轮询 SELECT 不检查返回值（P2）**：文件夹被删除/改名后陷入"NO→重连"静默循环；现与 mark_seen 一致抛带文件夹名的错误
+- **UIDVALIDITY 变更未清 _failed_uids（P1）**：UID 复用后旧失败集合永久屏蔽新邮件；同时给集合加 1000 上限防缓慢泄漏
+- **LIST literal 响应解析错误（P3）**：部分服务器（如 Gmail 非 ASCII 标签）返回 tuple 形式，原先 str(tuple) 解析出垃圾文本，文件夹被静默跳过；现逐段拼接，并兼容 literal 段的 UTF-8 字节名
+- **folder_to_wire 不转义引号/反斜杠（P3）**：用户手输含 `"` 或 `\` 的文件夹名会破坏 IMAP 命令语法
+- **security._atomic_write 无 fsync（P2）**：断电时 secrets.bin 可变空，全部账户密码丢失且无备份；与 config.save 对齐补 fsync
+- **AI client 错误处理（P2）**：URLError/JSONDecodeError/OSError 转可读 RuntimeError；响应读取限幅 4MB
+- **邮件元信息行显示字面 "None"（P3）**：from_name 等为 NULL 时渲染 "来自 None"；现兜底空串
+- **英文复制菜单状态栏文案（P3）**：`key[2:]` 切片使 EN 表部分键沦为死键；改用独立状态键
+- **嵌套列表无缩进、ul 项目符号不带样式（P3）**：渲染层级丢失；按深度缩进 + 符号挂样式标签
+- **打开新邮件后滚动位置残留**：从长邮件切到短邮件视图停在底部；现复位到顶部
+
+### Changed · 改进
+
+- scheduler.stop_account 的 join 移到调度锁外（原先 UI 线程持锁 join 最长 3s/账户）；stop_all 增加有界 join，防收信线程在 SQLite 写入中途被杀
+- build.spec 补 `PIL.ImageTk` hiddenimports 保险
+
 ## [1.11.5] — 2026-10-12
 
 设置对话框新增「帮助」页签：把散在 README 里的邮箱配置要点收进应用内。

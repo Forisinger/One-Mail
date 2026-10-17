@@ -225,6 +225,7 @@ class MainWindow:
         self._cid_cache: dict = {}   # CID 内嵌图原文缓存（会话级，64MB 限界）
         self._cid_lock = threading.Lock()   # 图片 worker 并发访问缓存（v1.11.4）
         self._account_status: dict[str, str] = {}   # 账户最近连接状态（v1.6.2）
+        self._account_error: dict[str, bool] = {}   # 错误标记（翻译前判定，v1.11.6）
         self._account_rows: list[tuple[tk.Frame, str | None]] = []
         self._folder_rows: list[tk.Frame] = []
         self._collapsed = bool(
@@ -598,7 +599,12 @@ class MainWindow:
         self.refresh_mails()
 
     def set_account_status(self, account_id: str, text: str):
-        """记录账户最近状态并刷新对应卡片（连接/推送/异常等）。"""
+        """记录账户最近状态并刷新对应卡片（连接/推送/异常等）。
+
+        v1.11.6：异常判定在**翻译前**的原始文本上做——原先拿翻译后的
+        英文文本匹配中文关键词，英文模式下错误高亮全部失效。
+        """
+        self._account_error[account_id] = self._is_error_status(text)
         text = _tr_status(text)
         if self._account_status.get(account_id) == text:
             return
@@ -656,7 +662,7 @@ class MainWindow:
             state = "" if acc.enabled else i18n.t("（已停用）")
             status = self._account_status.get(acc.id, "")
             sub = acc.email + (f"　·　{status}" if status else "")
-            if self._is_error_status(status):
+            if self._account_error.get(acc.id) or self._is_error_status(status):
                 # 异常账户红色高亮，多账户时一眼定位（v1.10.2）
                 _add_row(acc.name + state, acc.id, n, sub=sub,
                          sub_color=self.C["ERR"])
@@ -718,16 +724,18 @@ class MainWindow:
         self.refresh_mails()
 
     def _popup_menu(self, menu: tk.Menu, event) -> None:
-        """弹出右键菜单（v1.11.3 修复：不能在 tk_popup 返回后立即 destroy）。
+        """弹出右键菜单（v1.11.3：不能在 tk_popup 返回后立即 destroy）。
 
         Windows 上 Tk 的菜单项命令是在 tk_popup 返回之后异步 invoke 的；
         立即 destroy 会把尚未分发的 command 连同菜单一起销毁——表现为
-        「点了菜单项没有任何反应」（右键删除邮件即此 bug）。延迟销毁，
-        给命令分发留出窗口。
+        「点了菜单项没有任何反应」（右键删除邮件即此 bug）。
+        v1.11.6：改为 Unpost 事件后销毁。原先固定 500ms 后销毁，而
+        tk_popup 在 Windows 上立即返回——用户浏览子菜单（附件、移动到
+        文件夹）超过半秒，整个菜单树被强销，点击落空。
         """
         menu.tk_popup(event.x_root, event.y_root)
         menu.grab_release()
-        menu.after(500, menu.destroy)
+        menu.bind("<Unpost>", lambda e: menu.after(50, menu.destroy))
 
     def _folder_menu(self, event, name: str | None):
         """文件夹分区右键：新建 / 删除文件夹。"""
@@ -884,9 +892,13 @@ class MainWindow:
         self.txt_body.insert("end", "\n")
         self.txt_body.insert("end",
                              i18n.t("来自 {name} <{addr}>　·　{date}　·　来源：{acc}")
-                             .format(name=mail["from_name"], addr=mail["from_addr"],
-                                     date=mail["received_at"], acc=acc_name)
+                             .format(name=mail["from_name"] or "",
+                                     addr=mail["from_addr"] or "",
+                                     date=mail["received_at"] or "",
+                                     acc=acc_name)
                              + "\n", "meta")
+        # 打开新邮件后滚动复位：从长邮件切到短邮件时视图停在底部（v1.11.6）
+        self.txt_body.yview_moveto(0)
         att_names = self._mail_attachments(mail)
         if att_names:
             self.txt_body.insert(
@@ -1042,15 +1054,18 @@ class MainWindow:
         subj = mail["subject"] or ""
         name = mail["from_name"] or ""
         addr = mail["from_addr"] or ""
-        for key, val in (
-            ("复制主题", subj),
-            ("复制发件人", name),
-            ("复制发件人邮箱", addr),
-            ("复制正文", mail["body_text"] or ""),
+        # v1.11.6：状态栏 label 用独立键——原先 key[2:] 切片得到 "主题" 等键
+        # 恰好中文可用，但英文模式下 "复制发件人"[2:]="发件人" 不是有效键，
+        # 状态栏显示错误文案且 EN 表的部分键沦为死键
+        for key, skey, val in (
+            ("复制主题", "主题", subj),
+            ("复制发件人", "发件人名称", name),
+            ("复制发件人邮箱", "邮箱地址", addr),
+            ("复制正文", "正文", mail["body_text"] or ""),
         ):
             menu.add_command(label=i18n.t(key),
                              state="normal" if val.strip() else "disabled",
-                             command=lambda v=val, l=key[2:]: self._copy_to_clipboard(v, l))
+                             command=lambda v=val, l=skey: self._copy_to_clipboard(v, l))
         menu.add_separator()
         menu.add_command(label=i18n.t("回复"),
                          command=self.compose_reply)
@@ -1190,7 +1205,11 @@ class MainWindow:
         path = os.path.join(tmp_dir, self._safe_name(name))
         if os.path.exists(path):
             # 之前取过：直接复用，不再连服务器
-            os.startfile(path)
+            try:
+                os.startfile(path)
+            except OSError as e:
+                # 目标文件被占用/无关联程序：exe 无控制台，异常必须可见
+                self.var_status.set(i18n.t("打开附件失败: {err}").format(err=e))
             return
 
         def done(atts):
@@ -1199,9 +1218,13 @@ class MainWindow:
             if data is None:
                 self.var_status.set(i18n.t("未在服务器原文中解析出附件"))
                 return
-            with open(path, "wb") as f:
-                f.write(data)
-            os.startfile(path)
+            try:
+                with open(path, "wb") as f:
+                    f.write(data)
+                os.startfile(path)
+            except Exception as e:
+                self.var_status.set(i18n.t("打开附件失败: {err}").format(err=e))
+                return
             self.var_status.set(i18n.t("已打开：{name}").format(name=name))
 
         self._fetch_mail_attachments(mail, done)
@@ -1223,8 +1246,12 @@ class MainWindow:
             if data is None:
                 self.var_status.set(i18n.t("未在服务器原文中解析出附件"))
                 return
-            with open(dest, "wb") as f:
-                f.write(data)
+            try:
+                with open(dest, "wb") as f:
+                    f.write(data)
+            except Exception as e:
+                self.var_status.set(i18n.t("保存附件失败: {err}").format(err=e))
+                return
             self.var_status.set(i18n.t("已保存：{path}").format(path=dest))
 
         self._fetch_mail_attachments(mail, done)
@@ -1251,8 +1278,12 @@ class MainWindow:
                 while os.path.exists(path):
                     path = f"{stem}({n}){ext}"
                     n += 1
-                with open(path, "wb") as f:
-                    f.write(data)
+                try:
+                    with open(path, "wb") as f:
+                        f.write(data)
+                except Exception as e:
+                    self.var_status.set(i18n.t("保存附件失败: {err}").format(err=e))
+                    return
                 saved += 1
             self.var_status.set(i18n.t("已保存 {n} 个附件到 {dest}")
                                 .format(n=saved, dest=dest))
@@ -1466,6 +1497,7 @@ class MainWindow:
         else:
             self.scheduler.stop_account(acc.id)
             self._account_status.pop(acc.id, None)
+            self._account_error.pop(acc.id, None)
         self.full_refresh()
         self.var_status.set(
             i18n.t("账户 {name} 已保存，开始连接 {host} …")
@@ -1476,6 +1508,7 @@ class MainWindow:
     def _on_account_removed(self, account_id: str):
         """账户已由账户管理界面删除：清理界面状态并刷新。"""
         self._account_status.pop(account_id, None)
+        self._account_error.pop(account_id, None)
         if self._filter_account == account_id:
             self._filter_account = None
         self.full_refresh()

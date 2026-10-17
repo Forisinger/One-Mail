@@ -145,7 +145,13 @@ def decode(data: bytes):
             h = max(1, round(im.height * MAX_DISPLAY_W / im.width))
             im = im.resize((MAX_DISPLAY_W, h))
         if im.mode not in ("RGB", "RGBA"):
-            im = im.convert("RGB")
+            # 带透明通道的调色板图（P 模式 PNG/GIF，常见于邮件签名 logo）
+            # 直接转 RGB 会把透明像素映射成调色板实色——统一转 RGBA
+            # 保留透明度（ImageTk 原生支持，v1.11.6）
+            if im.mode == "P" and "transparency" in im.info:
+                im = im.convert("RGBA")
+            else:
+                im = im.convert("RGB")
         return im
     except Exception:
         return None

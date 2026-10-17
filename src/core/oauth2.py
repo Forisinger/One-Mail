@@ -305,17 +305,31 @@ def authorize(provider_name: str, email: str, client_id: str,
 
 # ---------- 运行期令牌获取 ----------
 
-_refresh_lock = threading.Lock()
+# v1.11.6：按 email 分片的刷新锁 + 一把保护分片表的小锁。
+# 原先全进程单锁且持锁做网络 IO（超时 30s），账户 A 刷新网络慢时，
+# 账户 B 的收信 / flag_sync / 乃至 UI 线程的发信全部排队，界面最长冻结 30s+。
+_refresh_locks: dict[str, threading.Lock] = {}
+_refresh_locks_guard = threading.Lock()
+
+
+def _email_lock(email: str) -> threading.Lock:
+    with _refresh_locks_guard:
+        lock = _refresh_locks.get(email)
+        if lock is None:
+            lock = threading.Lock()
+            _refresh_locks[email] = lock
+        return lock
 
 
 def get_access_token(account, now: float | None = None) -> str:
     """取账户的可用 access_token，必要时刷新。失败抛 OAuth2Error。
 
     account 需要有 email / auth_type / client_id / client_secret。
-    锁内「查-刷-存」原子化：scheduler 与 flag_sync 线程同时到期只刷一次。
+    锁内「查-刷-存」原子化（按账户分片）：scheduler 与 flag_sync 线程
+    同时到期只刷一次；不同账户互不阻塞。
     """
     email = account.email
-    with _refresh_lock:
+    with _email_lock(email):
         tok = load_token(email)
         if tok is None:
             raise OAuth2Error("尚未完成 OAuth2 登录，请在账户设置中重新登录")

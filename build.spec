@@ -9,6 +9,7 @@ a = Analysis(
     datas=[],
     hiddenimports=[
         'pystray._win32',                # pystray 运行时动态选择后端，需显式声明
+        'PIL.ImageTk',                   # imgload 函数体内懒加载，显式声明作保险
     ],
     hookspath=[],
     runtime_hooks=[],

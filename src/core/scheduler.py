@@ -34,9 +34,17 @@ class Scheduler:
 
     def stop_all(self):
         with self._lock:
-            for c in self._clients.values():
+            clients = list(self._clients.values())
+            for c in clients:
                 c.stop()
-        # 不 join，daemon 线程随进程退出
+        # 有界 join（锁外执行，避免阻塞 start_account/client）：
+        # 正常 IDLE 分片下 ≤2s 退出，上限 3s——防止收信线程在 SQLite
+        # 写入中途被杀造成"邮件入库但水位未推进"的不优雅截断（v1.11.6）
+        for c in clients:
+            try:
+                c.join_gracefully(timeout=3)
+            except Exception:
+                pass
 
     # ---------- 单账户管理 ----------
     def start_account(self, acc: Account):
@@ -59,8 +67,14 @@ class Scheduler:
             client.start()
 
     def stop_account(self, account_id: str):
+        # v1.11.6：join 移到锁外。原先持调度锁 join 3 秒——该路径在 UI 线程
+        # 调用（编辑账户/切换开关），期间 start_account/client 全被阻塞，
+        # 多账户场景下界面可冻结 3s × N
         with self._lock:
-            self._stop_client_locked(account_id)
+            client = self._clients.pop(account_id, None)
+        if client is not None:
+            client.stop()
+            client.join_gracefully(timeout=3)
 
     def _stop_client_locked(self, account_id: str):
         client = self._clients.pop(account_id, None)
@@ -69,7 +83,7 @@ class Scheduler:
             # 有界 join：正常 IDLE/轮询线程 ≤2s（select 分片）退出；卡在
             # _connect 的线程 join 不等满——幽灵邮件防线由 mail_client 在
             # 连接成功/对账/入库前的 stop 复查兜底，这里只是加速回收。
-            # 上限取小值防 UI 冻结（stop_account 在 UI 线程调用）。
+            # 上限取小值防 UI 冻结（start_account 在 UI 线程调用）。
             client.join_gracefully(timeout=3)
 
     def restart_account(self, acc: Account):

@@ -204,6 +204,9 @@ class ComposeWindow:
             var.set(i18n.t("AI 生成中…"))
             # 回复场景：把现有正文（含引用）作为上下文交给 AI
             context = self.txt_body.get("1.0", "end").strip()
+            # 重入保护（v1.11.6）：连点"生成"会起两个线程，第一个回调
+            # destroy 弹窗后第二个回调抛 TclError，结果静默丢失
+            btn_gen.configure(state="disabled")
 
             def work():
                 try:
@@ -212,8 +215,9 @@ class ComposeWindow:
                 except Exception as e:
                     result = ""
                     err = f"{type(e).__name__}: {e}"
-                    self.win.after(0, lambda: var.set(
-                        i18n.t("AI 生成失败：{err}").format(err=err)))
+                    self.win.after(0, lambda: (
+                        var.set(i18n.t("AI 生成失败：{err}").format(err=err)),
+                        btn_gen.configure(state="normal")))
                 else:
                     self.win.after(0, lambda: self._apply_ai_text(dlg, result, var))
 
@@ -226,10 +230,12 @@ class ComposeWindow:
                  font=FONT_UI).pack(side="left")
         ttk.Button(btns, text=i18n.t("取消"),
                    command=dlg.destroy).pack(side="right", padx=4)
-        ttk.Button(btns, text=i18n.t("生成"), command=do_generate).pack(
-            side="right")
+        btn_gen = ttk.Button(btns, text=i18n.t("生成"), command=do_generate)
+        btn_gen.pack(side="right")
 
     def _apply_ai_text(self, dlg: tk.Toplevel, text: str, var: tk.StringVar):
+        if not dlg.winfo_exists():
+            return   # 弹窗已关闭（重入/用户取消），丢弃迟到结果
         dlg.destroy()
         if not text:
             var.set(i18n.t("AI 未返回内容"))
@@ -283,6 +289,18 @@ class ComposeWindow:
                                   f"{idx} +1c")
             idx = self.txt_body.index(f"{idx} +1c")
 
+    def _clear_style_tags(self, start: str, end: str) -> None:
+        """清除选区内的颜色/字体样式标签（v1.11.6 重构）。
+
+        原先只看选区首字符的 tag_names——起点无色但中部带色时（从普通
+        文字拖选到红色文字很常见），残留标签与新色叠加且无法清除。
+        tag_remove 对未覆盖范围是安全操作，遍历全部样式标签即可。
+        """
+        for t in self.txt_body.tag_names():
+            if t.startswith(richtext.COLOR_PREFIX) or \
+               (t.startswith("fb") and len(t) == 7):
+                self.txt_body.tag_remove(t, start, end)
+
     def _pick_color(self):
         sel = self._sel_range()
         if not sel:
@@ -293,9 +311,7 @@ class ComposeWindow:
         hexc = color[1]
         # 先清掉选区内已有颜色标签：同一字符挂多个颜色时导出结果取决于
         # 标签优先级，不可预测；且残留的 color-* 标签会无限累积
-        for t in self.txt_body.tag_names(sel[0]):
-            if t.startswith(richtext.COLOR_PREFIX):
-                self.txt_body.tag_remove(t, sel[0], sel[1])
+        self._clear_style_tags(sel[0], sel[1])
         tag = richtext.COLOR_PREFIX + hexc
         self.txt_body.tag_configure(tag, foreground=hexc)
         self.txt_body.tag_add(tag, sel[0], sel[1])
@@ -304,10 +320,7 @@ class ComposeWindow:
         sel = self._sel_range()
         if not sel:
             return
-        for t in self.txt_body.tag_names(sel[0]):
-            if (t.startswith("fb") and len(t) == 7) or \
-               t.startswith(richtext.COLOR_PREFIX):
-                self.txt_body.tag_remove(t, sel[0], sel[1])
+        self._clear_style_tags(sel[0], sel[1])
 
     def _has_style(self) -> bool:
         """是否还残留任何样式标签（须检查标签是否有实际字符范围）。"""

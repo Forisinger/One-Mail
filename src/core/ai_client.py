@@ -15,6 +15,8 @@ import urllib.error
 import urllib.request
 
 TIMEOUT = 90
+# 单次响应读取上限（4MB）：正常总结/写信响应远小于此
+_MAX_RESPONSE = 4 * 1024 * 1024
 
 
 def build_request(base_url: str, api_key: str, model: str,
@@ -47,7 +49,8 @@ def chat(base_url: str, api_key: str, model: str, messages: list[dict],
     req = build_request(base_url, api_key, model, messages, timeout)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8", "replace"))
+            # 响应限幅：异常端点可返回任意大数据，read() 无上限会吃满内存
+            data = json.loads(resp.read(_MAX_RESPONSE).decode("utf-8", "replace"))
     except urllib.error.HTTPError as e:
         detail = ""
         try:
@@ -55,6 +58,12 @@ def chat(base_url: str, api_key: str, model: str, messages: list[dict],
         except Exception:
             pass
         raise RuntimeError(f"HTTP {e.code} {detail}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"无法连接 AI 服务: {e.reason}") from e
+    except json.JSONDecodeError as e:
+        raise RuntimeError("AI 服务返回了非 JSON 内容（请检查 API 地址是否正确）") from e
+    except OSError as e:
+        raise RuntimeError(f"AI 请求网络错误: {e}") from e
     try:
         return (data["choices"][0]["message"]["content"] or "").strip()
     except (KeyError, IndexError, TypeError) as e:

@@ -166,12 +166,27 @@ def save_to_sent(account: Account, password: str, msg: Message,
             conn = imaplib.IMAP4(account.imap_host, account.imap_port, timeout=timeout)
         try:
             imap_login(conn, account, password)
+            # 163/126 未上报 IMAP ID 时以 "Unsafe Login" 拒绝 LIST/APPEND——
+            # 其余临时连接（mark_seen/fetch_raw/list_folders）都上报了，
+            # 唯独这里漏掉，导致网易账户"已发送"同步永远静默失败（v1.11.6）
+            try:
+                from .mail_client import MailClient
+                MailClient._send_client_id(conn)
+            except Exception:
+                pass
             typ, boxes = conn.list()
             if typ != "OK":
                 return False
             folder = None          # 服务器原始名（mUTF-7），APPEND 用
             for raw in boxes or []:
-                line = raw if isinstance(raw, bytes) else str(raw).encode("utf-8", "ignore")
+                if isinstance(raw, tuple):
+                    # literal 响应：(b'... ', b'name')。逐段拼接字节再解析
+                    line = b"".join(
+                        p if isinstance(p, bytes)
+                        else str(p).encode("utf-8", "ignore")
+                        for p in raw)
+                else:
+                    line = raw if isinstance(raw, bytes) else str(raw).encode("utf-8", "ignore")
                 m = re.match(rb'\(([^)]*)\)\s+"?([^"]*)"?\s+(.+)', line.strip())
                 if not m:
                     continue
@@ -179,7 +194,11 @@ def save_to_sent(account: Account, password: str, msg: Message,
                 name = name.strip()
                 if name.startswith(b'"') and name.endswith(b'"') and len(name) >= 2:
                     name = name[1:-1]
-                decoded = _decode_mutf7(name.decode("ascii", "ignore"))
+                if all(b < 128 for b in name):
+                    decoded = _decode_mutf7(name.decode("ascii", "ignore"))
+                else:
+                    # literal 段携带的是原始 UTF-8 字节，不是 mUTF-7
+                    decoded = name.decode("utf-8", "ignore")
                 # 中文文件夹名必须解码后再比对；分隔符以服务器实际返回为准
                 sep = delim.decode("ascii", "ignore") or "/"
                 tail = decoded.rsplit(sep, 1)[-1] if sep != "/" else decoded.rsplit("/", 1)[-1]
@@ -188,6 +207,10 @@ def save_to_sent(account: Account, password: str, msg: Message,
                     break
             if not folder:
                 return False
+            # Bcc 头只该存在发信信封：smtplib.send_message 剥的是内部副本，
+            # 这里的原 msg 仍带 Bcc——直接 APPEND 会把密送名单永久留在
+            # 服务器已发送副本里（v1.11.6 修复）
+            del msg["Bcc"]
             # APPEND 必须用服务器原始名（imaplib 命令按 ascii 编码，中文名会炸）
             typ, _ = conn.append(f'"{folder}"', r"(\Seen)", None, msg.as_bytes())
             return typ == "OK"

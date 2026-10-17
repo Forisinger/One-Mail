@@ -64,10 +64,17 @@ _LOCK = threading.Lock()   # secrets.bin 读改写序列化，与 config 的锁�
 
 
 def _atomic_write(text: str) -> None:
-    """原子写：临时文件 + os.replace，进程中断不留半截 JSON。"""
+    """原子写：临时文件 + os.replace，进程中断不留半截 JSON。
+
+    v1.11.6：补 flush + fsync。Windows 上断电/崩溃时 rename 可能先于
+    数据块落盘，secrets.bin 变空/截断后全部账户密码丢失且无备份可恢复
+    （空文件会被读取路径当作空库直接覆盖）——与 config.save 的防线对齐。
+    """
     tmp = _SECRETS + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
     os.replace(tmp, _SECRETS)
 
 

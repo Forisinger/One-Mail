@@ -4,6 +4,47 @@ All notable changes to **OneMail** are documented here. (中文版见 [CHANGELOG
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.11.6] — 2026-10-17
+
+Three-way parallel code-review fix round: core protocol layer / UI layer / storage & entry points, 20+ items.
+
+### Fixed
+
+- **flag_sync grouping broke write ordering (P1)**: grouping by (account, folder, direction) pushed an R→U→R interleaved sequence's unread group last, so the server's final state contradicted the user's last action. Now processes in enqueue order, merging only *consecutive* same-direction tasks
+- **flag_sync retry amplification (P2)**: two consecutive failures of a group's first chunk now abort the whole group — previously a network outage during "mark all read" of 1000 mails did 20×2 full connect+login rounds, blocking the worker for minutes
+- **save_to_sent missing IMAP ID command (P1)**: NetEase 163/126 reject LIST/APPEND with "Unsafe Login" when no ID is sent, so Sent-folder sync silently never worked; now reported
+- **Sent copy kept the Bcc header (P3)**: `send_message` strips Bcc from its internal copy only; the APPENDed original still carried it — BCC lists were permanently stored on the server. Now removed before APPEND
+- **OAuth2 refresh global lock (P1)**: replaced with per-email sharded locks — previously one slow refresh (30s network timeout) froze all other accounts' fetching and the UI's sending
+- **Context menu force-destroyed after 500ms (P1)**: tk_popup returns immediately on Windows; browsing the Attachments / Move-to-folder submenus past half a second destroyed the whole menu tree. Now destroyed shortly after the Unpost event
+- **Error-state accounts lost red highlight in English UI (P1)**: error detection ran against translated text, so Chinese keywords never matched. Now detected before translation
+- **Compose color-pick / clear-format only inspected the first char of the selection (P2)**: partial clearing left stale tags stacking with new colors. Now clears across the full selection
+- **AI drafting had no re-entrancy guard (P2)**: double-clicking "Generate" spawned two threads; the late result raised TclError and was silently lost. Button now disabled while generating; late callbacks dropped after dialog close
+- **Attachment open/save callbacks had no exception guard (P2)**: a locked target file or missing association made clicks silently do nothing (windowless exe). Now caught with a friendly status message
+- **Palette images with transparency rendered as solid noise (P2)**: P-mode PNG/GIF (common in signature logos) converted to RGB lost transparency. Now converted to RGBA when a transparency info is present
+- **Valid JSON with wrong types crashed startup (P1)**: `[1,2]`/`"x"`/`null` made load() raise AttributeError — the windowless exe just didn't start, and the corrupt-backup path never triggered. Now type-checked and routed through the backup flow
+- **Corrupt-config backup overwrote the previous evidence (P2)**: timestamped names when the target exists
+- **No recovery path for a corrupted database (P1)**: a damaged onemail.db made the app permanently unstartable. Now renamed with a timestamp (`onemail.db.corrupt-…`) and rebuilt automatically
+- **mark_all_read_synced's "same transaction" guarantee never held (P1)**: sqlite3 legacy mode doesn't open transactions for SELECT, so the read-write gap was real. Now explicit `BEGIN IMMEDIATE`
+- **single_instance lacked HANDLE prototypes (P2)**: default restype c_int sign-extends handles with the high bit set, silently breaking the wakeup path. Full argtypes/restype declarations added
+- **Startup exceptions were invisible (P2)**: main() now has a top-level guard writing the traceback to onemail.log and showing a message box
+- **Unbounded log growth (P2)**: onemail.log rotates to .log.1 past 1MB
+- **Notification failures fully silent (P2)**: pystray notify exceptions now logged
+- **Poll SELECT result unchecked (P2)**: a deleted/renamed folder caused a silent NO→reconnect loop; now raises a folder-named error like mark_seen does
+- **UIDVALIDITY change didn't clear _failed_uids (P1)**: after UID reuse, old failed UIDs permanently masked new mail; the set also now caps at 1000
+- **LIST literal responses mis-parsed (P3)**: some servers (e.g. Gmail non-ASCII labels) return tuple lines; str(tuple) produced garbage and the folder was silently skipped. Now joins segments and supports UTF-8 literal names
+- **folder_to_wire didn't escape quotes/backslashes (P3)**: user-typed folder names with `"` or `\` broke IMAP command syntax
+- **security._atomic_write lacked fsync (P2)**: power loss could empty secrets.bin, losing all stored passwords. Aligned with config.save
+- **AI client error handling (P2)**: URLError/JSONDecodeError/OSError wrapped into readable RuntimeErrors; response reads capped at 4MB
+- **Mail meta line could show literal "None" (P3)**: NULL fields now fall back to empty strings
+- **English copy-menu status text (P3)**: the `key[2:]` slice trick made several EN keys dead; explicit status keys now
+- **Nested lists had no indent and ul bullets carried no style (P3)**: depth-based indent + styled bullets
+- **Scroll position persisted across mails**: opening a short mail after a long one kept the view at the bottom; now resets
+
+### Changed
+
+- scheduler.stop_account's join moved outside the scheduler lock (previously froze the UI up to 3s per account); stop_all gains a bounded join so mail threads aren't killed mid-SQLite-write
+- build.spec adds `PIL.ImageTk` hiddenimports insurance
+
 ## [1.11.4] — 2026-10-06
 
 Multi-agent code-review round: Gmail OAuth2 sending, rich-text rendering, plus several concurrency & robustness fixes.

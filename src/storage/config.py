@@ -33,15 +33,35 @@ def load() -> dict:
                 data = json.load(f)
         except Exception:
             # 损坏的配置先备份留证，再回默认——绝不静默丢弃用户数据
-            try:
-                os.replace(_CONFIG, _CONFIG + ".corrupt")
-            except OSError:
-                pass
+            _backup_corrupt()
+            return json.loads(json.dumps(_DEFAULT))
+        # 合法 JSON 但类型不对（[1,2] / "x" / null 等）同样要兜住：
+        # 否则 data.setdefault 抛 AttributeError 逃出 load()，exe 无控制台
+        # 表现为"双击无反应"，且 .corrupt 备份逻辑完全不触发（v1.11.6）
+        if not isinstance(data, dict) or not isinstance(
+                data.get("accounts", []), list):
+            _backup_corrupt()
             return json.loads(json.dumps(_DEFAULT))
     # 补齐缺失键
     for k, v in _DEFAULT["settings"].items():
-        data.setdefault("settings", {}).setdefault(k, v)
+        settings = data.setdefault("settings", {})
+        if not isinstance(settings, dict):
+            data["settings"] = dict(_DEFAULT["settings"])
+            break
+        settings.setdefault(k, v)
     return data
+
+
+def _backup_corrupt() -> None:
+    """备份损坏配置。目标已存在时改用带时间戳的名字，避免覆盖上一次留证。"""
+    dst = _CONFIG + ".corrupt"
+    try:
+        if os.path.exists(dst):
+            import time
+            dst = f"{_CONFIG}.corrupt.{time.strftime('%Y%m%d-%H%M%S')}"
+        os.replace(_CONFIG, dst)
+    except OSError:
+        pass
 
 
 def save(data: dict) -> None:

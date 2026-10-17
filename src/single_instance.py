@@ -16,6 +16,24 @@ from ctypes import wintypes
 
 _k32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
+# v1.11.6：声明 HANDLE 原型。未声明时 restype 默认 c_int（32 位有符号），
+# 高位为 1 的句柄（如 0x80001234）会变负数，传回 WaitForSingleObject/
+# SetEvent 时按符号扩展成 0xFFFFFFFFxxxxxxxx，与真实句柄不符——
+# 调用静默失败，唤醒功能永久失效
+_k32.CreateMutexW.restype = wintypes.HANDLE
+_k32.CreateMutexW.argtypes = [wintypes.LPCWSTR, wintypes.BOOL, wintypes.LPCWSTR]
+_k32.CreateEventW.restype = wintypes.HANDLE
+_k32.CreateEventW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.BOOL,
+                              wintypes.LPCWSTR]
+_k32.OpenEventW.restype = wintypes.HANDLE
+_k32.OpenEventW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
+_k32.SetEvent.argtypes = [wintypes.HANDLE]
+_k32.CloseHandle.argtypes = [wintypes.HANDLE]
+_k32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+_k32.WaitForSingleObject.restype = wintypes.DWORD
+
+_INVALID_HANDLE = {None, wintypes.HANDLE(-1).value}   # NULL 与 INVALID_HANDLE_VALUE
+
 _MUTEX_NAME = "Local\\OneMail_SingleInstance_Mutex"
 _EVENT_NAME = "Local\\OneMail_SingleInstance_Wakeup"
 
@@ -34,19 +52,21 @@ def acquire() -> bool:
     返回 False：已有实例在运行（应先 notify_running_instance 再退出）。
     """
     global _mutex_handle
-    _mutex_handle = _k32.CreateMutexW(None, False, _MUTEX_NAME)
+    err = _k32.CreateMutexW(None, False, _MUTEX_NAME)
+    _mutex_handle = err
     # CreateMutexW 失败返回 INVALID_HANDLE_VALUE(-1) 而非 NULL：只查 NULL 会把
     # ACCESS_DENIED 等失败误判成"成功且不存在"，双开保护静默失效（v1.10.2）
-    if not _mutex_handle or _mutex_handle == -1:
+    if _mutex_handle in _INVALID_HANDLE:
         # 互斥体创建失败，绝不假阳性地放行双开
         return False
+    # get_last_error 紧跟 API 调用读取，避免中间插入其他调用后读到脏值
     return ctypes.get_last_error() != _ERROR_ALREADY_EXISTS
 
 
 def notify_running_instance() -> bool:
     """第二实例调用：唤醒已运行的实例。返回是否成功发信号。"""
     ev = _k32.OpenEventW(_EVENT_MODIFY_STATE, False, _EVENT_NAME)
-    if not ev:
+    if not ev or ev in _INVALID_HANDLE:
         return False
     _k32.SetEvent(ev)
     _k32.CloseHandle(ev)
@@ -61,7 +81,7 @@ def start_watcher(on_wakeup, error_log=None) -> None:
     """
     # 自动复位事件：WaitForSingleObject 返回后自动清除信号
     ev = _k32.CreateEventW(None, False, False, _EVENT_NAME)
-    if not ev:
+    if not ev or ev in _INVALID_HANDLE:
         return
 
     def _run():

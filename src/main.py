@@ -136,10 +136,20 @@ class App:
 
     @staticmethod
     def _log(msg: str):
-        """轻量日志：状态/异常落盘，便于排查。"""
+        """轻量日志：状态/异常落盘，便于排查。超过 1MB 轮转为 .log.1。"""
         try:
-            with open(os.path.join(data_dir(), "onemail.log"), "a",
-                      encoding="utf-8") as f:
+            path = os.path.join(data_dir(), "onemail.log")
+            try:
+                if os.path.exists(path) and os.path.getsize(path) > 1024 * 1024:
+                    try:
+                        os.replace(path, path + ".1")
+                    except OSError:
+                        # 轮转失败（被占用等）则截断，保证日志有界
+                        with open(path, "r+b") as f:
+                            f.truncate(0)
+            except OSError:
+                pass
+            with open(path, "a", encoding="utf-8") as f:
                 f.write(f"{datetime.now():%m-%d %H:%M:%S} {msg}\n")
         except OSError:
             pass
@@ -155,7 +165,7 @@ class App:
             msg = f"{first['from_name'] or first['from_addr']}\n{first['subject']}"
             if len(mails) > 1:
                 msg += i18n.t("（{n} 封）").format(n=len(mails))
-            notify_send(self.tray.icon, title, msg)
+            notify_send(self.tray.icon, title, msg, error_log=self._log)
             self.window.set_status(
                 i18n.t("[{name}] 收到 {n} 封新邮件").format(
                     name=account.name, n=len(mails)))
@@ -217,11 +227,32 @@ class App:
 def main():
     # 单实例：已有 OneMail 在运行时，唤醒其主窗口并退出本进程
     if not acquire():
-        notify_running_instance()
+        if not notify_running_instance():
+            # 唤醒失败：第二实例静默消失且主窗口无感知，至少留一条日志线索
+            try:
+                App._log("第二实例启动：唤醒已运行实例失败（未找到唤醒事件）")
+            except Exception:
+                pass
         return
-    # 双击 exe 直接显示主窗口；仅开机自启（注册表项带 --minimized）静默进托盘
-    start_minimized = "--minimized" in sys.argv
-    App(start_minimized)
+    # 启动期异常兜底（v1.11.6）：App.__init__ 里 database.init()/MainWindow/
+    # Tray 构造都可能抛异常，exe 是 console=False，原先进程直接消失，
+    # onemail.log 一个字都没有——最常见的"双击没反应"组合
+    try:
+        start_minimized = "--minimized" in sys.argv
+        App(start_minimized)
+    except Exception:
+        try:
+            App._log("启动失败:\n" + traceback.format_exc())
+        except Exception:
+            pass
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(
+                None, "一邮通启动失败，详情见 %APPDATA%\\OneMail\\onemail.log",
+                "OneMail", 0x10)
+        except Exception:
+            pass
+        raise
 
 
 if __name__ == "__main__":
