@@ -225,7 +225,7 @@ class MainWindow:
         self._cid_cache: dict = {}   # CID 内嵌图原文缓存（会话级，64MB 限界）
         self._cid_lock = threading.Lock()   # 图片 worker 并发访问缓存（v1.11.4）
         self._account_status: dict[str, str] = {}   # 账户最近连接状态（v1.6.2）
-        self._account_error: dict[str, bool] = {}   # 错误标记（翻译前判定，v1.11.6）
+        self._account_error: dict[str, bool] = {}   # 错误标记（翻译前判定，v1.11.7）
         self._account_rows: list[tuple[tk.Frame, str | None]] = []
         self._folder_rows: list[tk.Frame] = []
         self._collapsed = bool(
@@ -601,7 +601,7 @@ class MainWindow:
     def set_account_status(self, account_id: str, text: str):
         """记录账户最近状态并刷新对应卡片（连接/推送/异常等）。
 
-        v1.11.6：异常判定在**翻译前**的原始文本上做——原先拿翻译后的
+        v1.11.7：异常判定在**翻译前**的原始文本上做——原先拿翻译后的
         英文文本匹配中文关键词，英文模式下错误高亮全部失效。
         """
         self._account_error[account_id] = self._is_error_status(text)
@@ -729,7 +729,7 @@ class MainWindow:
         Windows 上 Tk 的菜单项命令是在 tk_popup 返回之后异步 invoke 的；
         立即 destroy 会把尚未分发的 command 连同菜单一起销毁——表现为
         「点了菜单项没有任何反应」（右键删除邮件即此 bug）。
-        v1.11.6：改为 Unpost 事件后销毁。原先固定 500ms 后销毁，而
+        v1.11.7：改为 Unpost 事件后销毁。原先固定 500ms 后销毁，而
         tk_popup 在 Windows 上立即返回——用户浏览子菜单（附件、移动到
         文件夹）超过半秒，整个菜单树被强销，点击落空。
         """
@@ -897,7 +897,7 @@ class MainWindow:
                                      date=mail["received_at"] or "",
                                      acc=acc_name)
                              + "\n", "meta")
-        # 打开新邮件后滚动复位：从长邮件切到短邮件时视图停在底部（v1.11.6）
+        # 打开新邮件后滚动复位：从长邮件切到短邮件时视图停在底部（v1.11.7）
         self.txt_body.yview_moveto(0)
         att_names = self._mail_attachments(mail)
         if att_names:
@@ -1054,7 +1054,7 @@ class MainWindow:
         subj = mail["subject"] or ""
         name = mail["from_name"] or ""
         addr = mail["from_addr"] or ""
-        # v1.11.6：状态栏 label 用独立键——原先 key[2:] 切片得到 "主题" 等键
+        # v1.11.7：状态栏 label 用独立键——原先 key[2:] 切片得到 "主题" 等键
         # 恰好中文可用，但英文模式下 "复制发件人"[2:]="发件人" 不是有效键，
         # 状态栏显示错误文案且 EN 表的部分键沦为死键
         for key, skey, val in (

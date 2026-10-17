@@ -234,7 +234,7 @@ def main():
             except Exception:
                 pass
         return
-    # 启动期异常兜底（v1.11.6）：App.__init__ 里 database.init()/MainWindow/
+    # 启动期异常兜底（v1.11.7）：App.__init__ 里 database.init()/MainWindow/
     # Tray 构造都可能抛异常，exe 是 console=False，原先进程直接消失，
     # onemail.log 一个字都没有——最常见的"双击没反应"组合
     try:

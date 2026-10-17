@@ -16,7 +16,7 @@ from ctypes import wintypes
 
 _k32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
-# v1.11.6：声明 HANDLE 原型。未声明时 restype 默认 c_int（32 位有符号），
+# v1.11.7：声明 HANDLE 原型。未声明时 restype 默认 c_int（32 位有符号），
 # 高位为 1 的句柄（如 0x80001234）会变负数，传回 WaitForSingleObject/
 # SetEvent 时按符号扩展成 0xFFFFFFFFxxxxxxxx，与真实句柄不符——
 # 调用静默失败，唤醒功能永久失效

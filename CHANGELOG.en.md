@@ -4,7 +4,7 @@ All notable changes to **OneMail** are documented here. (中文版见 [CHANGELOG
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/).
 
-## [1.11.6] — 2026-10-17
+## [1.11.7] — 2026-10-17
 
 Three-way parallel code-review fix round: core protocol layer / UI layer / storage & entry points, 20+ items.
 

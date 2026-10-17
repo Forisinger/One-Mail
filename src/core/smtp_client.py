@@ -168,7 +168,7 @@ def save_to_sent(account: Account, password: str, msg: Message,
             imap_login(conn, account, password)
             # 163/126 未上报 IMAP ID 时以 "Unsafe Login" 拒绝 LIST/APPEND——
             # 其余临时连接（mark_seen/fetch_raw/list_folders）都上报了，
-            # 唯独这里漏掉，导致网易账户"已发送"同步永远静默失败（v1.11.6）
+            # 唯独这里漏掉，导致网易账户"已发送"同步永远静默失败（v1.11.7）
             try:
                 from .mail_client import MailClient
                 MailClient._send_client_id(conn)
@@ -209,7 +209,7 @@ def save_to_sent(account: Account, password: str, msg: Message,
                 return False
             # Bcc 头只该存在发信信封：smtplib.send_message 剥的是内部副本，
             # 这里的原 msg 仍带 Bcc——直接 APPEND 会把密送名单永久留在
-            # 服务器已发送副本里（v1.11.6 修复）
+            # 服务器已发送副本里（v1.11.7 修复）
             del msg["Bcc"]
             # APPEND 必须用服务器原始名（imaplib 命令按 ascii 编码，中文名会炸）
             typ, _ = conn.append(f'"{folder}"', r"(\Seen)", None, msg.as_bytes())

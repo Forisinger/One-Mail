@@ -39,7 +39,7 @@ class Scheduler:
                 c.stop()
         # 有界 join（锁外执行，避免阻塞 start_account/client）：
         # 正常 IDLE 分片下 ≤2s 退出，上限 3s——防止收信线程在 SQLite
-        # 写入中途被杀造成"邮件入库但水位未推进"的不优雅截断（v1.11.6）
+        # 写入中途被杀造成"邮件入库但水位未推进"的不优雅截断（v1.11.7）
         for c in clients:
             try:
                 c.join_gracefully(timeout=3)
@@ -67,7 +67,7 @@ class Scheduler:
             client.start()
 
     def stop_account(self, account_id: str):
-        # v1.11.6：join 移到锁外。原先持调度锁 join 3 秒——该路径在 UI 线程
+        # v1.11.7：join 移到锁外。原先持调度锁 join 3 秒——该路径在 UI 线程
         # 调用（编辑账户/切换开关），期间 start_account/client 全被阻塞，
         # 多账户场景下界面可冻结 3s × N
         with self._lock:

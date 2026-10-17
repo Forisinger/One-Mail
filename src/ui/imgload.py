@@ -147,7 +147,7 @@ def decode(data: bytes):
         if im.mode not in ("RGB", "RGBA"):
             # 带透明通道的调色板图（P 模式 PNG/GIF，常见于邮件签名 logo）
             # 直接转 RGB 会把透明像素映射成调色板实色——统一转 RGBA
-            # 保留透明度（ImageTk 原生支持，v1.11.6）
+            # 保留透明度（ImageTk 原生支持，v1.11.7）
             if im.mode == "P" and "transparency" in im.info:
                 im = im.convert("RGBA")
             else:

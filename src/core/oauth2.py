@@ -305,7 +305,7 @@ def authorize(provider_name: str, email: str, client_id: str,
 
 # ---------- 运行期令牌获取 ----------
 
-# v1.11.6：按 email 分片的刷新锁 + 一把保护分片表的小锁。
+# v1.11.7：按 email 分片的刷新锁 + 一把保护分片表的小锁。
 # 原先全进程单锁且持锁做网络 IO（超时 30s），账户 A 刷新网络慢时，
 # 账户 B 的收信 / flag_sync / 乃至 UI 线程的发信全部排队，界面最长冻结 30s+。
 _refresh_locks: dict[str, threading.Lock] = {}

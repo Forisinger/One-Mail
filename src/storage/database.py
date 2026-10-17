@@ -150,7 +150,7 @@ def init() -> None:
     try:
         _init_db()
     except sqlite3.DatabaseError as e:
-        # 数据库损坏自愈（v1.11.6）：断电/杀软干扰可致 onemail.db 损坏，
+        # 数据库损坏自愈（v1.11.7）：断电/杀软干扰可致 onemail.db 损坏，
         # 原先每次启动都抛 DatabaseError，应用永久无法启动只能手删文件。
         # 现在改名留证后重建空库（邮件历史丢失但应用可用）。
         import time
@@ -332,7 +332,7 @@ def mark_all_read_synced(account_id: str | None = None) -> list[sqlite3.Row]:
     先 SELECT 未读 (account_id, folder, uid) 再 UPDATE 置已读——若无事务包裹，
     间隙中入库的新邮件会被置已读却不在投递集合里，造成"本地已读、服务器
     永久未读"且水位机制不会自愈。rows 供 flag_sync 投递。
-    （v1.11.6：显式 BEGIN IMMEDIATE——sqlite3 legacy 模式下 SELECT 不会
+    （v1.11.7：显式 BEGIN IMMEDIATE——sqlite3 legacy 模式下 SELECT 不会
     开启事务，读-写间隙真实存在，docstring 声称的不变量原先只是靠进程内
     全局锁间接成立。）
     """

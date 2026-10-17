@@ -37,7 +37,7 @@ def load() -> dict:
             return json.loads(json.dumps(_DEFAULT))
         # 合法 JSON 但类型不对（[1,2] / "x" / null 等）同样要兜住：
         # 否则 data.setdefault 抛 AttributeError 逃出 load()，exe 无控制台
-        # 表现为"双击无反应"，且 .corrupt 备份逻辑完全不触发（v1.11.6）
+        # 表现为"双击无反应"，且 .corrupt 备份逻辑完全不触发（v1.11.7）
         if not isinstance(data, dict) or not isinstance(
                 data.get("accounts", []), list):
             _backup_corrupt()

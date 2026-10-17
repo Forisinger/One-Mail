@@ -10,7 +10,7 @@ from __future__ import annotations
 def send(tray_icon, title: str, message: str, error_log=None):
     """通过托盘图标发系统气泡通知。tray_icon 为 pystray.Icon。
 
-    v1.11.6：失败不再裸吞——图标未就绪/Shell_NotifyIcon 失败时用户
+    v1.11.7：失败不再裸吞——图标未就绪/Shell_NotifyIcon 失败时用户
     "收不到新邮件提醒"却毫无线索，至少落一条日志。
     """
     try:

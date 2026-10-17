@@ -113,7 +113,7 @@ class _Renderer(HTMLParser):
             self._ol_counters.append(0 if tag == "ol" else -1)
         elif tag == "li" and self._list_stack:
             kind = self._list_stack[-1]
-            # 嵌套列表按深度缩进：层级关系原先完全丢失（v1.11.6）
+            # 嵌套列表按深度缩进：层级关系原先完全丢失（v1.11.7）
             indent = "    " * max(0, len(self._list_stack) - 1)
             stags = self._tags_for(self.style)
             if indent:
@@ -123,7 +123,7 @@ class _Renderer(HTMLParser):
                 self.w.insert("end", f"{self._ol_counters[-1]}. ", stags)
             else:
                 # 项目符号与序号一致挂样式标签：<li><b>x</b> 的 "• " 原先
-                # 是普通字重，与序号列表行为不一致（v1.11.6）
+                # 是普通字重，与序号列表行为不一致（v1.11.7）
                 self.w.insert("end", _LIST_PREFIX.get(kind, "• "), stags)
 
         old = self.style

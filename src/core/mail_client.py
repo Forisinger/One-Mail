@@ -361,7 +361,7 @@ class MailClient:
             database.delete_account_mails(self.account.id)
             max_uid = 0
             # UID 复用后旧失败集合已无意义：不清空会让曾抓取失败的旧 UID
-            # 永久屏蔽复用后的新邮件（v1.11.6 修复）
+            # 永久屏蔽复用后的新邮件（v1.11.7 修复）
             self._failed_uids.clear()
         elif uidvalidity:
             database.set_folder_state(self.account.id, folder,
@@ -446,7 +446,7 @@ class MailClient:
                 if isinstance(item, tuple):
                     # literal 响应：(b'... ', b'name')。逐段拼接字节再解析，
                     # 否则 str(tuple).encode 是垃圾文本，该文件夹被静默跳过
-                    # （Gmail 的非 ASCII 标签可触发，v1.11.6 修复）
+                    # （Gmail 的非 ASCII 标签可触发，v1.11.7 修复）
                     line = b"".join(
                         p if isinstance(p, bytes)
                         else str(p).encode("utf-8", "ignore")
@@ -559,7 +559,7 @@ def folder_to_wire(name: str) -> str:
     注意：纯 ASCII 的 `&` 也必须转义为 `&-`（mUTF-7 规范），因此
     含 `&` 的 ASCII 名同样走编码，不做"原始名直通"猜测。
     引号/反斜杠在 IMAP quoted-string 里必须用反斜杠转义，否则会破坏
-    命令语法（v1.11.6：用户手输文件夹名的防御）。
+    命令语法（v1.11.7：用户手输文件夹名的防御）。
     """
     try:
         name.encode("ascii")

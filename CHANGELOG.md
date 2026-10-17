@@ -4,7 +4,7 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/)。
 
-## [1.11.6] — 2026-10-17
+## [1.11.7] — 2026-10-17
 
 三路并行代码审查修复轮：core 协议层 / UI 层 / 存储与入口，共 20 余项。
 

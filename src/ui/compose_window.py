@@ -204,7 +204,7 @@ class ComposeWindow:
             var.set(i18n.t("AI 生成中…"))
             # 回复场景：把现有正文（含引用）作为上下文交给 AI
             context = self.txt_body.get("1.0", "end").strip()
-            # 重入保护（v1.11.6）：连点"生成"会起两个线程，第一个回调
+            # 重入保护（v1.11.7）：连点"生成"会起两个线程，第一个回调
             # destroy 弹窗后第二个回调抛 TclError，结果静默丢失
             btn_gen.configure(state="disabled")
 
@@ -290,7 +290,7 @@ class ComposeWindow:
             idx = self.txt_body.index(f"{idx} +1c")
 
     def _clear_style_tags(self, start: str, end: str) -> None:
-        """清除选区内的颜色/字体样式标签（v1.11.6 重构）。
+        """清除选区内的颜色/字体样式标签（v1.11.7 重构）。
 
         原先只看选区首字符的 tag_names——起点无色但中部带色时（从普通
         文字拖选到红色文字很常见），残留标签与新色叠加且无法清除。
