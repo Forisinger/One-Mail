@@ -31,7 +31,8 @@ _CJK_RE = re.compile(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af\u3000-\u303f\uff
 
 
 class _Style:
-    __slots__ = ("bold", "italic", "underline", "strike", "color", "link", "size")
+    __slots__ = ("bold", "italic", "underline", "strike", "color", "link",
+                 "size", "href", "quote")
 
     def __init__(self, **kw):
         self.bold = kw.get("bold", False)
@@ -41,11 +42,13 @@ class _Style:
         self.color = kw.get("color", "")
         self.link = kw.get("link", False)
         self.size = kw.get("size", 0)   # 相对基准字号 ±
+        self.href = kw.get("href", "")   # 链接目标（v1.12.0：可点击）
+        self.quote = kw.get("quote", False)   # blockquote 引用块（v1.12.0）
 
     def copy(self, **kw):
         s = _Style(bold=self.bold, italic=self.italic, underline=self.underline,
                    strike=self.strike, color=self.color, link=self.link,
-                   size=self.size)
+                   size=self.size, href=self.href, quote=self.quote)
         for k, v in kw.items():
             setattr(s, k, v)
         return s
@@ -91,9 +94,30 @@ class _Renderer(HTMLParser):
                 f.append("bold")
             tags.append(self._tag(font=tuple(f)))
         if s.link:
-            tags.append(self._tag(foreground=self.c["ACCENT"]))
+            name = self._tag(foreground=self.c["ACCENT"])
+            # v1.12.0：链接可点击（tag_bind 绑定在每个链接标签上）
+            if s.href:
+                url = s.href
+
+                def _open(_e, url=url):
+                    try:
+                        import webbrowser
+                        webbrowser.open(url)
+                    except Exception:
+                        pass
+
+                self.w.tag_bind(name, "<Button-1>", _open)
+                self.w.tag_bind(name, "<Enter>",
+                                lambda _e: self.w.configure(cursor="hand2"))
+                self.w.tag_bind(name, "<Leave>",
+                                lambda _e: self.w.configure(cursor=""))
+            tags.append(name)
         elif s.color:
             tags.append(self._tag(foreground=s.color))
+        if s.quote:
+            # 引用块：缩进 + 灰色，与正文一眼可分（v1.12.0）
+            tags.append(self._tag(lmargin1=18, lmargin2=18,
+                                  foreground=self.c.get("GRAY", "#888888")))
         return tuple(tags)
 
     # ---------- 解析事件 ----------
@@ -140,7 +164,9 @@ class _Renderer(HTMLParser):
         elif tag == "s" or tag == "strike":
             self.style = old.copy(strike=True)
         elif tag == "a":
-            self.style = old.copy(link=True)
+            self.style = old.copy(link=True, href=(a.get("href") or "").strip())
+        elif tag == "blockquote":
+            self.style = old.copy(quote=True)
         elif tag in _HEADING:
             self.style = old.copy(bold=True, size=_HEADING[tag])
         elif tag in ("span", "font"):

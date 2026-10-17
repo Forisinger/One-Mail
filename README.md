@@ -111,6 +111,7 @@ pyinstaller build.spec --noconfirm
 - [x] 修复 Gmail OAuth2 发信（465 缺 EHLO）、富文本内联空格丢失等审查问题；右键回复、账户管理与 AI 结果窗键盘操作 ✅ v1.11.4
 - [x] 设置新增「帮助」页签（邮箱配置指引 / AI 配置 / 收发失败排查）；修复旧库启动崩溃 no such column: local_folder ✅ v1.11.5
 - [x] 三路并行审查修复轮（20+ 项）：flag_sync 写序、OAuth2 分片锁、右键菜单强销、英文界面错误高亮、数据库损坏自愈、config 类型校验、启动崩溃可见化等 ✅ v1.11.7
+- [x] 体验增强轮：HTML 链接可点击、邮件列表多选、搜索占位+Ctrl+F、blockquote/嵌套列表排版、首拉限量+6h 对账、SQLite WAL ✅ v1.12.0
 
 ## 📄 许可证
 

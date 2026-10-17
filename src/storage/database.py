@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS mails (
     UNIQUE(account_id, folder, uid)
 );
 CREATE INDEX IF NOT EXISTS idx_mails_account ON mails(account_id, received_at DESC);
-CREATE INDEX IF NOT EXISTS idx_mails_unread ON mails(is_read);
+DROP INDEX IF EXISTS idx_mails_unread;
+CREATE INDEX IF NOT EXISTS idx_mails_account_read ON mails(account_id, is_read);
 CREATE INDEX IF NOT EXISTS idx_mails_local ON mails(local_folder);
 CREATE TABLE IF NOT EXISTS folder_state (
     account_id TEXT NOT NULL,
@@ -117,6 +118,13 @@ def _conn() -> Iterator[sqlite3.Connection]:
     """
     conn = sqlite3.connect(_DB, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    # v1.12.0：WAL 允许收信后台写与 UI 大搜索（LIKE 扫 body_text）读写并发，
+    # 原先默认 journal 模式下写会阻塞读；busy_timeout 兜底锁竞争
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+    except sqlite3.DatabaseError:
+        pass
     try:
         with conn:
             yield conn
@@ -192,6 +200,26 @@ def get_folder_state(account_id: str, folder: str) -> tuple[int, int]:
             "SELECT uidvalidity, max_uid FROM folder_state"
             " WHERE account_id=? AND folder=?", (account_id, folder)).fetchone()
     return (row["uidvalidity"], row["max_uid"]) if row else (0, 0)
+
+
+def existing_uids(account_id: str, folder: str, uids: list[str]) -> set[str]:
+    """返回本地已缓存的 UID 集合（低频对账用，v1.12.0）。
+
+    传入的 uid 列表分批查询（调用方控制批量），返回其中已存在的子集。
+    """
+    if not uids:
+        return set()
+    out: set[str] = set()
+    with _LOCK, _conn() as conn:
+        for i in range(0, len(uids), 500):
+            chunk = uids[i:i + 500]
+            placeholders = ",".join("?" * len(chunk))
+            rows = conn.execute(
+                f"SELECT uid FROM mails WHERE account_id=? AND folder=?"
+                f" AND uid IN ({placeholders})",
+                (account_id, folder, *chunk)).fetchall()
+            out.update(r["uid"] for r in rows)
+    return out
 
 
 def set_folder_state(account_id: str, folder: str,

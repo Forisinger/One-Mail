@@ -226,6 +226,10 @@ _EN = {
     "恢复收信": "Resume Fetching",
     "暂停收信": "Pause Fetching",
     "全部标为已读": "Mark All Read",
+    # ---- v1.12.0 ----
+    "搜索邮件…": "Search mails…",
+    "已标记 {n} 封为已读": "Marked {n} mail(s) as read",
+    "已标记 {n} 封为未读": "Marked {n} mail(s) as unread",
     "同步已读到服务器": "Sync Read State to Server",
     "退出": "Quit",
     "一邮通 OneMail｜未读 {n}": "OneMail | Unread {n}",

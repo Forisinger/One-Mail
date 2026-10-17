@@ -4,6 +4,30 @@ All notable changes to **OneMail** are documented here. (中文版见 [CHANGELOG
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.12.0] — 2026-10-17
+
+Experience-enhancement round: reading pane interaction, fetch-engine efficiency, UI details.
+
+### Added
+
+- **Clickable HTML links**: `<a href>` in mails now opens in the browser / mail handler, with a hand cursor on hover
+- **Multi-select mail list**: extended selection mode; Shift/Ctrl multi-select then batch mark read/unread/delete
+- **Search placeholder + Ctrl+F**: grey "Search mails…" hint when empty, Esc clears
+- **Blockquote visual distinction**: left indent + grey foreground
+- **Nested lists indented by depth**
+- **First-pull limit**: newly added large mailboxes fetch only the latest 200 unread mails instead of the full history
+- **Low-frequency full reconciliation** (every 6h): covers watermark blind spots — old mails re-marked unread on the web, locally deleted mails, and history truncated by the first-pull limit get backfilled
+- **SQLite WAL mode + busy_timeout**: background fetch writes no longer block UI full-text searches
+- **Composite unread index** `(account_id, is_read)` replaces the single-column index
+- Status bar feedback showing the count for mark-all-read and batch marks
+
+### Fixed
+
+- Clicking an account row now resets the folder filter (both filters previously coexisted confusingly)
+- Selection colors in the reading pane / AI result window follow the theme accent
+- AI summary re-entrancy guard (no more stacked result windows)
+- Scroll position resets when opening a new mail
+
 ## [1.11.7] — 2026-10-17
 
 Three-way parallel code-review fix round: core protocol layer / UI layer / storage & entry points, 20+ items.

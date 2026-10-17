@@ -30,6 +30,11 @@ _CONNECT_TIMEOUT = 15            # IMAP 建连超时（秒），含 list_folders
 # 从 IDLE 未请求响应里抓邮箱状态行（如 * 23 EXISTS）
 _EXISTS_RE = re.compile(rb"\*\s+(\d+)\s+EXISTS", re.IGNORECASE)
 
+# 首次收信限量与对账周期（v1.12.0）：大邮箱首次添加账户不再全量下载
+# 几千封历史未读；剩余旧未读由低频对账逐步补齐
+FIRST_PULL_LIMIT = 200
+RECONCILE_INTERVAL = 6 * 3600   # 秒
+
 
 def imap_login(conn, account, password: str) -> None:
     """按账户认证方式登录 IMAP：密码登录 or OAuth2 XOAUTH2（v1.10.0）。
@@ -72,6 +77,7 @@ class MailClient:
         self._thread: threading.Thread | None = None
         self._conn: imaplib.IMAP4 | None = None   # 供 stop() 关 socket 打断阻塞
         self._failed_uids: set[str] = set()  # 单封失败记忆：二次失败跳过防队头阻塞
+        self._last_reconcile = time.time()   # 上次全量对账时间（v1.12.0，首拉不算对账）
 
     # ---------- 生命周期 ----------
     def start(self):
@@ -367,13 +373,35 @@ class MailClient:
             database.set_folder_state(self.account.id, folder,
                                       uidvalidity, max_uid)
 
+        # v1.12.0：首拉限量 + 低频全量对账。
+        # 水位机制只看得见"比已知最大 UID 新"的变化——网页端把旧邮件标
+        # 未读、本地删除后再收、以及首拉被限量的历史未读，都因 UID ≤ 水位
+        # 被永久跳过。每 RECONCILE_INTERVAL 做一次 DB 存在性对账兜底。
+        reconcile = (time.time() - self._last_reconcile) >= RECONCILE_INTERVAL
+        if reconcile:
+            self._last_reconcile = time.time()
+        elif max_uid == 0:
+            # 首拉限量：只取最近 FIRST_PULL_LIMIT 封（UID 升序取尾段）
+            uids = uids[-FIRST_PULL_LIMIT:]
+
+        known: set[str] | None = None
+        if reconcile:
+            known = set()
+            for i in range(0, len(uids), 500):
+                chunk = [u.decode() for u in uids[i:i + 500]]
+                known.update(
+                    database.existing_uids(self.account.id, folder, chunk))
+
         batch = []
         fetched_max = 0
         for uid in uids:
             if self._stop.is_set():
                 break
             uid_num = int(uid)
-            if uid_num <= max_uid:
+            if reconcile:
+                if uid.decode() in known:
+                    continue   # 本地已有（含首拉限量外的旧未读）不再下载
+            elif uid_num <= max_uid:
                 continue            # 本地已有该 UID 的缓存，跳过原文下载
             typ, msgdata = conn.uid("fetch", uid, "(BODY.PEEK[])")
             if (typ != "OK" or not msgdata or not msgdata[0]

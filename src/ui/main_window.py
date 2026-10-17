@@ -326,6 +326,28 @@ class MainWindow:
         # 搜索防抖：停顿 300ms 后才查库，避免每敲一个字符全表扫描
         self._search_job = None
         self._search_var.trace_add("write", self._on_search_changed)
+        # 占位提示 + Ctrl+F（v1.12.0）：空态显示灰字，聚焦即消失
+        self._search_entry = entry
+        self._search_ph = i18n.t("搜索邮件…")
+        self._search_var.set(self._search_ph)
+        entry.configure(fg=self.C["GRAY"])
+        entry.bind("<FocusIn>", self._search_focus_in)
+        entry.bind("<FocusOut>", self._search_focus_out)
+        self.root.bind("<Control-f>", self._search_shortcut)
+
+    def _search_shortcut(self, _e=None):
+        self._search_entry.focus_set()
+        return "break"   # 拦截 Text 默认的 forward-char，避免边打字边跳焦点
+
+    def _search_focus_in(self, _e=None):
+        if self._search_var.get() == self._search_ph:
+            self._search_var.set("")
+            self._search_entry.configure(fg=self.C["TEXT"])
+
+    def _search_focus_out(self, _e=None):
+        if not self._search_var.get():
+            self._search_var.set(self._search_ph)
+            self._search_entry.configure(fg=self.C["GRAY"])
 
     def open_settings(self):
         from .settings_dialog import SettingsDialog
@@ -382,7 +404,7 @@ class MainWindow:
         # 请求高度加起来远超最小窗口，缩放/重排时两个分栏会互相挤占（曾把
         # 整个邮件列表连同列头挤成 0 高度而"消失"）
         self.tree = ttk.Treeview(frame_top, columns=cols, show="headings",
-                                 selectmode="browse", height=6)
+                                 selectmode="extended", height=6)   # v1.12.0: 多选批量操作
         for cid, text, width, anchor in (
             ("account", i18n.t("来源"), 110, "w"),
             ("from", i18n.t("发件人"), 160, "w"),
@@ -420,6 +442,7 @@ class MainWindow:
             body_card, wrap="word", state="disabled", relief="flat",
             padx=16, pady=12, bg=self.C["CARD"], fg=self.C["TEXT"],
             font=FONT_UI, bd=0, insertbackground=self.C["TEXT"],
+            selectbackground=self.C["ACCENT"], selectforeground=self.C["SEL_FG"],
             height=8,   # 同理：默认 24 行会把邮件列表挤没
         )
         # 结构化排版标签
@@ -590,6 +613,8 @@ class MainWindow:
         return sorted(rows, key=sort_value, reverse=desc)
 
     def _on_search_changed(self, *_):
+        if self._search_var.get() == self._search_ph:
+            return   # 占位文本不是搜索词
         if self._search_job is not None:
             self.root.after_cancel(self._search_job)
         self._search_job = self.root.after(300, self._search_fire)
@@ -790,6 +815,9 @@ class MainWindow:
 
     def _select_account(self, account_id: str | None):
         self._filter_account = account_id
+        # 点击账户行同时复位文件夹筛选：原先两维筛选共存，"全部邮件"与
+        # 某文件夹同时高亮、列表仍被过滤，状态令人困惑（v1.12.0）
+        self._filter_local = None
         self.refresh_accounts()
         self.refresh_mails()
 
@@ -837,6 +865,8 @@ class MainWindow:
     def refresh_mails(self):
         """按账户 + 本地文件夹 + 过滤器 + 关键字组合查询（搜索下沉 SQL）。"""
         keyword = self._search_var.get().strip()
+        if keyword == getattr(self, "_search_ph", None):
+            keyword = ""   # 占位提示不是搜索词（v1.12.0）
         mode = self._filter_var.get()
         self.tree.delete(*self.tree.get_children())
         rows, total = db.search_mails(
@@ -1317,6 +1347,10 @@ class MainWindow:
         sender = f"{sender} ({acc_name})" if acc_name else sender
         body = mail["body_text"] or ""
         self.var_status.set(i18n.t("正在请求 AI…"))
+        # 重入保护（v1.12.0）：请求期间再点右键 AI 总结会叠加多个结果窗
+        if getattr(self, "_ai_busy", False):
+            return
+        self._ai_busy = True
 
         def work():
             try:
@@ -1329,6 +1363,8 @@ class MainWindow:
                     i18n.t("AI 总结失败：{err}").format(err=err)))
             else:
                 self.root.after(0, lambda: self._show_ai_result(subject, result))
+            finally:
+                self._ai_busy = False
 
         threading.Thread(target=work, name="onemail-ai", daemon=True).start()
 
@@ -1342,7 +1378,9 @@ class MainWindow:
         theme_mod.window_colors(win, self.C)        # 跟随主题（v1.11.2）
         win.transient(self.root)
         txt = tk.Text(win, wrap="word", font=FONT_UI, bd=0, padx=14, pady=12,
-                      bg=self.C["CARD"], fg=self.C["TEXT"])
+                      bg=self.C["CARD"], fg=self.C["TEXT"],
+                      selectbackground=self.C["ACCENT"],
+                      selectforeground=self.C["SEL_FG"])   # v1.12.0: 选区色随主题
         txt.pack(fill="both", expand=True)
         txt.insert("1.0", text)
         txt.configure(state="disabled")
@@ -1404,33 +1442,47 @@ class MainWindow:
         self._sync_read_flags(rows, seen=True)
         self.full_refresh()
         self.root.event_generate("<<UnreadChanged>>", when="tail")
+        # 回显数量：托盘/工具栏误触时至少知道动了多少封（v1.12.0）
+        self.var_status.set(
+            i18n.t("已标记 {n} 封为已读").format(n=len(rows)))
 
     def mark_selected_read(self):
         sel = self.tree.selection()
         if not sel:
             return
-        mail = db.get_mail(int(sel[0]))
-        if mail is None:
+        # v1.12.0：多选批量标已读
+        mails = [m for m in (db.get_mail(int(i)) for i in sel) if m is not None]
+        unread = [m for m in mails if not m["is_read"]]
+        if not mails:
             return
-        db.mark_read(mail["id"])
-        self._sync_read_flags([mail], seen=True)
+        for m in unread:
+            db.mark_read(m["id"])
+        self._sync_read_flags(unread, seen=True)
         self.refresh_mails()
         self.refresh_accounts()
         self.root.event_generate("<<UnreadChanged>>", when="tail")
+        if unread:
+            self.var_status.set(
+                i18n.t("已标记 {n} 封为已读").format(n=len(unread)))
 
     def mark_selected_unread(self):
         """标记为未读：本地置回未读，并经 flag_sync 向服务器 -FLAGS \\Seen（v1.8.0）。"""
         sel = self.tree.selection()
         if not sel:
             return
-        mail = db.get_mail(int(sel[0]))
-        if mail is None or not mail["is_read"]:
-            return  # 已是未读：短路，免一次无谓的服务器短连接
-        db.mark_read(mail["id"], read=False)
-        self._sync_read_flags([mail], seen=False)
+        # v1.12.0：多选批量标未读
+        mails = [m for m in (db.get_mail(int(i)) for i in sel)
+                 if m is not None and m["is_read"]]
+        if not mails:
+            return
+        for m in mails:
+            db.mark_read(m["id"], read=False)
+        self._sync_read_flags(mails, seen=False)
         self.refresh_mails()
         self.refresh_accounts()
         self.root.event_generate("<<UnreadChanged>>", when="tail")
+        self.var_status.set(
+            i18n.t("已标记 {n} 封为未读").format(n=len(mails)))
 
     # ---------- 账户管理（v1.11.0：添加/编辑/删除合并到同一界面） ----------
     def open_account_manager(self, account_id: str | None = None):
